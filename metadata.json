@@ -1,0 +1,5 @@
+{
+  "name": "SPX GEX Sentinel",
+  "description": "A high-performance trading dashboard for monitoring SPX 0DTE Gamma Exposure (GEX) with AI-powered market analysis and automated strategy alerts.",
+  "requestFramePermissions": []
+}
