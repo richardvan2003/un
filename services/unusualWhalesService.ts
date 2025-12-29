@@ -1,5 +1,5 @@
 
-import { AnalysisPacket, GexDataPoint } from '../types';
+import { AnalysisPacket, GexDataPoint, PriceLevelVolume, MarketTidePoint } from '../types';
 
 interface UWSpotExposureResponsePoint {
   time: string;
@@ -27,111 +27,97 @@ export class APIError extends Error {
   }
 }
 
+const calculateVolatilityTrigger = (
+  currentPrice: number,
+  currentGex: number,
+  gexChange: number,
+  priceLevels: PriceLevelVolume[]
+): number => {
+  if (!priceLevels || priceLevels.length === 0) return Math.round(currentPrice);
+  const hvn = [...priceLevels].sort((a, b) => b.total_volume - a.total_volume)[0].price;
+  let vt = hvn;
+  if (currentGex >= 0) vt = Math.min(currentPrice, hvn) - 5;
+  else vt = Math.max(currentPrice, hvn) + 5;
+  return Math.round(vt);
+};
+
 export const fetchUWMarketData = async (ticker: string, apiKey: string): Promise<AnalysisPacket | null> => {
   if (!apiKey) return null;
-
+  const authHeader = apiKey.startsWith('Bearer ') ? apiKey : `Bearer ${apiKey}`;
+  
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+    const [exposureRes, tideRes, levelsRes] = await Promise.all([
+      fetch(`https://api.unusualwhales.com/api/stock/${ticker}/spot-exposures`, { headers: { 'Authorization': authHeader } }),
+      fetch(`https://api.unusualwhales.com/api/market/market-tide`, { headers: { 'Authorization': authHeader } }),
+      fetch(`https://api.unusualwhales.com/api/stock/${ticker}/option/stock-price-levels`, { headers: { 'Authorization': authHeader } })
+    ]);
 
-    const response = await fetch(`https://api.unusualwhales.com/api/stock/${ticker}/spot-exposures`, {
-      headers: {
-        'Authorization': apiKey,
-        'Accept': 'application/json'
-      },
-      signal: controller.signal
-    });
+    if (!exposureRes.ok) throw new APIError("Exposure Fetch Fail");
 
-    clearTimeout(timeoutId);
+    const exposureJson = await exposureRes.json();
+    const tideJson = await tideRes.json();
+    const levelsJson = await levelsRes.json();
 
-    if (response.status === 401 || response.status === 403) {
-      throw new APIError("UnusualWhales API 密钥无效或已过期", response.status, 'AUTH_FAILED');
-    }
-
-    if (response.status === 429) {
-      throw new APIError("UnusualWhales 请求频率过快，请稍后再试", response.status, 'RATE_LIMIT');
-    }
-
-    if (!response.ok) {
-      throw new APIError(`UW API 服务器异常: ${response.status}`, response.status, 'SERVER_ERROR');
-    }
-
-    const json = await response.json();
-    
-    let dataPoints: UWSpotExposureResponsePoint[] = [];
-    if (Array.isArray(json)) {
-      dataPoints = json;
-    } else if (json && Array.isArray(json.data)) {
-      dataPoints = json.data;
-    } else if (json && json.data) {
-      dataPoints = [json.data];
-    }
-
-    if (dataPoints.length === 0) {
-      return null;
-    }
-
-    const sorted = dataPoints
-      .filter(p => p && p.time)
-      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-
-    if (sorted.length === 0) return null;
-
+    const dataPoints = Array.isArray(exposureJson) ? exposureJson : (exposureJson.data || []);
+    const sorted = dataPoints.sort((a: any, b: any) => new Date(a.time).getTime() - new Date(b.time).getTime());
     const latest = sorted[sorted.length - 1];
-    const previous = sorted[sorted.length - 2] || latest;
+    const prev = sorted[sorted.length - 2] || latest;
+    const currentPrice = parseSafeNumber(latest.price);
 
-    const currentPrice = parseSafeNumber(latest.price, 5250); 
-    const currentExposure = parseSafeNumber(latest.exposure, 0);
-    const prevPrice = parseSafeNumber(previous.price, currentPrice);
-    const prevExposure = parseSafeNumber(previous.exposure, currentExposure);
-    
-    const currentOi = latest.oi !== undefined ? parseSafeNumber(latest.oi) : Math.abs(currentExposure * 1.5);
-    const current_1dte_vol = latest.exposure_1dte !== undefined ? parseSafeNumber(latest.exposure_1dte) : (currentExposure * 0.42);
-    const current_1dte_oi = latest.exposure_1dte_oi !== undefined ? parseSafeNumber(latest.exposure_1dte_oi) : (currentOi * 0.6);
-    
-    const gex_1dte_wall = latest.wall_1dte !== undefined ? parseSafeNumber(latest.wall_1dte) : (Math.round(currentPrice / 25) * 25);
-    const gex_1dte_block = latest.block_1dte !== undefined ? parseSafeNumber(latest.block_1dte) : Math.round(current_1dte_oi * 0.08);
-
-    let gex_1dte_drive_raw = latest.drive_1dte !== undefined ? parseSafeNumber(latest.drive_1dte, -999) : -999;
-    if (gex_1dte_drive_raw === -999) {
-      const gexDelta = currentExposure - prevExposure;
-      const priceDelta = currentPrice - prevPrice;
-      gex_1dte_drive_raw = priceDelta !== 0 ? Math.abs(gexDelta / priceDelta) / 1000000 : 0.45;
-    }
-
-    const trendData: GexDataPoint[] = sorted.slice(-30).map((p) => {
-      const pExp = parseSafeNumber(p.exposure, 0);
-      const pPrice = parseSafeNumber(p.price, currentPrice);
-      const pOi = p.oi !== undefined ? parseSafeNumber(p.oi) : Math.abs(pExp * 1.5);
-      
+    const levels: PriceLevelVolume[] = (levelsJson.data || []).map((item: any) => {
+      const cv = parseSafeNumber(item.call_volume);
+      const pv = parseSafeNumber(item.put_volume);
       return {
-        time: p.time,
-        price: pPrice,
-        gamma_per_one_percent_move_vol: pExp,
-        gamma_per_one_percent_move_oi: pOi,
-        gamma_1dte_vol: p.exposure_1dte !== undefined ? parseSafeNumber(p.exposure_1dte) : (pExp * 0.4),
-        gamma_1dte_oi: p.exposure_1dte_oi !== undefined ? parseSafeNumber(p.exposure_1dte_oi) : (pOi * 0.5)
+        price: parseSafeNumber(item.price),
+        call_volume: cv,
+        put_volume: pv,
+        total_volume: cv + pv,
+        net_gex: (cv - pv) * ( (cv+pv) / 1000 )
       };
-    });
+    }).filter((l: any) => Math.abs(l.price - currentPrice) / currentPrice < 0.05);
+
+    // Identify King Strike
+    const kingStrike = levels.length > 0 
+      ? [...levels].sort((a, b) => Math.abs(b.net_gex) - Math.abs(a.net_gex))[0].price 
+      : undefined;
+
+    // Identify Zero Gamma (Flip Point) - Level where net_gex is closest to zero
+    const zeroGamma = levels.length > 0
+      ? [...levels].sort((a, b) => Math.abs(a.net_gex) - Math.abs(b.net_gex))[0].price
+      : undefined;
+
+    const currentGex = parseSafeNumber(latest.exposure);
+    const tideLatest = tideJson.data ? tideJson.data[tideJson.data.length - 1] : null;
 
     return {
       ticker: ticker.toUpperCase(),
       timestamp: latest.time,
       current_price: Number(currentPrice.toFixed(2)),
-      current_gex_vol: Math.round(currentExposure),
-      current_gex_oi: Math.round(currentOi),
-      gex_vol_change_rate: Math.round(currentExposure - prevExposure),
-      current_1dte_vol: Math.round(current_1dte_vol),
-      current_1dte_oi: Math.round(current_1dte_oi),
-      gex_1dte_wall: Math.round(gex_1dte_wall),
-      gex_1dte_block: Math.round(gex_1dte_block),
-      gex_1dte_drive: Number(Math.min(1.0, Math.max(0.0, gex_1dte_drive_raw)).toFixed(2)),
-      trend_data: trendData
+      current_gex_vol: Math.round(currentGex),
+      current_gex_oi: Math.round(parseSafeNumber(latest.oi)),
+      gex_vol_change_rate: Math.round(currentGex - parseSafeNumber(prev.exposure)),
+      current_1dte_vol: Math.round(parseSafeNumber(latest.exposure_1dte)),
+      current_1dte_oi: Math.round(parseSafeNumber(latest.exposure_1dte_oi)),
+      gex_1dte_wall: Math.round(parseSafeNumber(latest.wall_1dte)),
+      gex_1dte_block: Math.round(parseSafeNumber(latest.block_1dte)),
+      gex_1dte_drive: parseSafeNumber(latest.drive_1dte),
+      volatility_trigger: calculateVolatilityTrigger(currentPrice, currentGex, 0, levels),
+      hvn_price: levels.length > 0 ? [...levels].sort((a, b) => b.total_volume - a.total_volume)[0].price : undefined,
+      king_strike: kingStrike,
+      zero_gamma: zeroGamma,
+      trend_data: sorted.slice(-50).map((p: any) => ({
+        time: p.time,
+        price: parseSafeNumber(p.price),
+        gamma_per_one_percent_move_vol: parseSafeNumber(p.exposure),
+        gamma_per_one_percent_move_oi: parseSafeNumber(p.oi)
+      })),
+      market_tide: tideLatest ? {
+        timestamp: tideLatest.timestamp,
+        net_call_premium: parseSafeNumber(tideLatest.net_call_premium),
+        net_put_premium: parseSafeNumber(tideLatest.net_put_premium),
+        net_volume: tideLatest.net_volume
+      } : undefined,
+      price_levels: levels
     };
-  } catch (error: any) {
-    if (error.name === 'AbortError') {
-      throw new APIError("UnusualWhales 请求超时，请检查网络连接", 408, 'TIMEOUT');
-    }
-    throw error;
-  }
+  } catch (error) { throw error; }
 };

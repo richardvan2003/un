@@ -13,6 +13,7 @@ import Panel from './components/Panel';
 import CommandTerminal from './components/CommandTerminal';
 import SettingsPanel from './components/SettingsPanel';
 import ErrorBanner from './components/ErrorBanner';
+import StrategyLibrary from './components/StrategyLibrary';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
@@ -25,11 +26,17 @@ const App: React.FC = () => {
   const [hasPaidKey, setHasPaidKey] = useState(false);
   const [uplinkStatus, setUplinkStatus] = useState<'simulated' | 'live' | 'error'>('simulated');
   const [systemError, setSystemError] = useState<SystemError | null>(null);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [lastPushSuccess, setLastPushSuccess] = useState<string | null>(null);
   
   const lastAnalyzedRef = useRef<number>(0);
   const consecutiveFailuresRef = useRef<number>(0);
+  const alertsRef = useRef<TradingAlert[]>([]);
 
-  // Preference Persistence
+  useEffect(() => {
+    alertsRef.current = alerts;
+  }, [alerts]);
+
   const [appTheme, setAppTheme] = useState<AppTheme>(() => 
     (localStorage.getItem('sentinel_theme') as AppTheme) || 'emerald'
   );
@@ -37,7 +44,6 @@ const App: React.FC = () => {
     (localStorage.getItem('sentinel_font_size') as AppFontSize) || 'base'
   );
 
-  // External Config Persistence
   const [externalConfig, setExternalConfig] = useState(() => {
     const saved = localStorage.getItem('sentinel_ext_config');
     const defaultConfig = { 
@@ -58,7 +64,6 @@ const App: React.FC = () => {
     return defaultConfig;
   });
 
-  // Sync Preferences
   useEffect(() => {
     localStorage.setItem('sentinel_theme', appTheme);
     document.body.className = `theme-${appTheme}`;
@@ -93,10 +98,65 @@ const App: React.FC = () => {
     }
   };
 
+  const pushToDiscord = useCallback(async (alert: TradingAlert) => {
+    if (!externalConfig.discordWebhook) return false;
+    
+    setIsBroadcasting(true);
+    try {
+      const truncate = (str: string, max: number) => str.length > max ? str.substring(0, max - 3) + "..." : str;
+      const chunks = [];
+      const rawText = alert.rawAnalysis || alert.analysis;
+      for (let i = 0; i < rawText.length; i += 2000) {
+        chunks.push(rawText.substring(i, i + 2000));
+      }
+
+      const discordPayload = {
+        username: "SPX GEX Sentinel",
+        avatar_url: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/shuttle-space.svg",
+        embeds: chunks.slice(0, 10).map((chunk, idx) => ({
+          title: idx === 0 ? `🎯 ${alert.strategy} 信号触发 - SPX 指数` : `🎯 分析报告 (续 ${idx + 1})`,
+          description: truncate(chunk, 2048),
+          color: alert.strategy === 'LONG' ? 3066993 : alert.strategy === 'SHORT' ? 15158332 : 3447003,
+          fields: idx === 0 ? [
+            { name: '识别模式', value: alert.pattern || '未知', inline: true },
+            { name: '推荐策略', value: alert.recommendedStrategies?.join(', ') || 'N/A', inline: true },
+            { name: '执行现价', value: `$${alert.price}`, inline: true },
+            { name: '市场制度', value: truncate(alert.regime, 256), inline: true },
+            { name: '风险提示', value: truncate(alert.risk, 1024) }
+          ] : [],
+          footer: {
+            text: `Sentinel R.C.-02 | 动力学解码引擎 | 第 ${idx + 1} 部分`
+          },
+          timestamp: alert.timestamp
+        }))
+      };
+
+      const res = await fetch(externalConfig.discordWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(discordPayload)
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      
+      setAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, pushedToDiscord: true } : a));
+      setLastPushSuccess(alert.id);
+      setTimeout(() => setLastPushSuccess(null), 5000); 
+      return true;
+    } catch (err) {
+      console.error("Discord 推送失败:", err);
+      return false;
+    } finally {
+      setIsBroadcasting(false);
+    }
+  }, [externalConfig.discordWebhook]);
+
   const performAnalysis = useCallback(async (packet: AnalysisPacket) => {
     setIsAnalyzing(true);
+    const lastAlert = alertsRef.current[0] || null;
+    
     try {
-      const analysisResult = await analyzeGexData(packet, () => {
+      const analysisResult = await analyzeGexData(packet, lastAlert, () => {
         setQuotaExceeded(true);
         setSystemError({
           message: "Gemini API 配额已耗尽，请考虑升级或切换付费 Key。",
@@ -111,36 +171,22 @@ const App: React.FC = () => {
         timestamp: new Date().toISOString(),
         price: packet.current_price,
         strategy: analysisResult.strategy || 'NEUTRAL',
+        pattern: analysisResult.pattern,
+        recommendedStrategies: analysisResult.recommendedStrategies,
         regime: analysisResult.regime || '未知',
         analysis: analysisResult.analysis || '正在等待资金流解码...',
         risk: analysisResult.risk || '风险监控运行中。',
-        rawAnalysis: analysisResult.rawAnalysis || ''
+        rawAnalysis: analysisResult.rawAnalysis || '',
+        pushedToDiscord: false
       };
 
       setAlerts(prev => [newAlert, ...prev].slice(0, 50));
-
-      if (externalConfig.discordWebhook && analysisResult.strategy !== 'NEUTRAL') {
-        fetch(externalConfig.discordWebhook, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            embeds: [{
-              title: `🎯 ${newAlert.strategy} 信号触发 - SPX`,
-              color: newAlert.strategy === 'LONG' ? 65280 : 16711680,
-              fields: [
-                { name: '现价', value: `$${newAlert.price}`, inline: true },
-                { name: '制度', value: newAlert.regime, inline: true },
-                { name: '分析', value: newAlert.analysis },
-                { name: '风险', value: newAlert.risk }
-              ],
-              timestamp: newAlert.timestamp
-            }]
-          })
-        }).catch(err => console.error("Discord 转发失败:", err));
+      if (newAlert.strategy !== 'NEUTRAL') {
+        pushToDiscord(newAlert);
       }
-    } catch (err) {
+    } catch (err: any) {
       setSystemError({
-        message: "AI 分析链路异常，请检查 Gemini API 配置。",
+        message: `Gemini Multi-DTE 分析错误: ${err?.message || '未知通信异常'}`,
         severity: 'error',
         timestamp: Date.now(),
         retryable: true
@@ -148,7 +194,7 @@ const App: React.FC = () => {
     } finally {
       setIsAnalyzing(false);
     }
-  }, [externalConfig.discordWebhook]);
+  }, [pushToDiscord]);
 
   const fetchAndProcess = useCallback(async (isManualRetry = false) => {
     if (!isBotRunning && !isManualRetry) return;
@@ -175,13 +221,22 @@ const App: React.FC = () => {
 
       setMarketData(latest);
       
+      const netTideVal = latest.market_tide 
+        ? (latest.market_tide.net_call_premium - latest.market_tide.net_put_premium) 
+        : (latest.trend_data[latest.trend_data.length - 1]?.net_tide || 0);
+
       const newHistoryPoint: GexDataPoint = {
         time: latest.timestamp,
         price: latest.current_price,
         gamma_per_one_percent_move_vol: latest.current_gex_vol,
         gamma_per_one_percent_move_oi: latest.current_gex_oi,
         gamma_1dte_vol: latest.current_1dte_vol,
-        gamma_1dte_oi: latest.current_1dte_oi
+        gamma_1dte_oi: latest.current_1dte_oi,
+        net_tide: netTideVal,
+        gex_vol_change_rate: latest.gex_vol_change_rate,
+        gex_1dte_wall: latest.gex_1dte_wall,
+        gex_1dte_block: latest.gex_1dte_block,
+        gex_1dte_drive: latest.gex_1dte_drive
       };
 
       setHistory(prev => {
@@ -190,10 +245,10 @@ const App: React.FC = () => {
       });
 
       const now = Date.now();
-      const threeMinutes = 180000;
-      const whaleThreshold = 5000000;
+      const interval = 300000; 
+      const whaleThreshold = 15000000; 
 
-      if (now - lastAnalyzedRef.current > threeMinutes || Math.abs(latest.gex_vol_change_rate) > whaleThreshold) {
+      if (now - lastAnalyzedRef.current > interval || Math.abs(latest.gex_vol_change_rate) > whaleThreshold) {
         await performAnalysis(latest);
         lastAnalyzedRef.current = now;
       }
@@ -202,7 +257,6 @@ const App: React.FC = () => {
       consecutiveFailuresRef.current++;
       setUplinkStatus('error');
       
-      // Upgrade severity if failures persist
       if (consecutiveFailuresRef.current > 3) {
         setSystemError({
           message: e instanceof APIError ? e.message : "实时上行链路多次尝试连接失败，切换至模拟模式。",
@@ -220,19 +274,28 @@ const App: React.FC = () => {
 
   useEffect(() => {
     fetchAndProcess();
-    const interval = setInterval(fetchAndProcess, 5000);
+    const interval = setInterval(fetchAndProcess, 120000);
     return () => clearInterval(interval);
   }, [fetchAndProcess]);
 
   const handleManualInject = (data: AnalysisPacket) => {
     setMarketData(data);
+    const netTideVal = data.market_tide 
+      ? (data.market_tide.net_call_premium - data.market_tide.net_put_premium) 
+      : 0;
+      
     setHistory(prev => [...prev, {
       time: data.timestamp,
       price: data.current_price,
       gamma_per_one_percent_move_vol: data.current_gex_vol,
       gamma_per_one_percent_move_oi: data.current_gex_oi,
       gamma_1dte_vol: data.current_1dte_vol,
-      gamma_1dte_oi: data.current_1dte_oi
+      gamma_1dte_oi: data.current_1dte_oi,
+      net_tide: netTideVal,
+      gex_vol_change_rate: data.gex_vol_change_rate,
+      gex_1dte_wall: data.gex_1dte_wall,
+      gex_1dte_block: data.gex_1dte_block,
+      gex_1dte_drive: data.gex_1dte_drive
     }].slice(-500));
   };
 
@@ -271,6 +334,13 @@ const App: React.FC = () => {
                  Uplink: {uplinkStatus === 'live' ? 'UW-LIVE' : uplinkStatus === 'error' ? 'UPLINK-FAIL' : 'SIMULATED'}
                </span>
             </div>
+
+            {isBroadcasting && (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.2)]">
+                <i className="fa-brands fa-discord text-[10px]"></i>
+                <span className="text-[9px] font-black uppercase tracking-widest">正在广播到 Discord...</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-4">
@@ -299,13 +369,22 @@ const App: React.FC = () => {
             <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 h-full">
               <div className="xl:col-span-3 space-y-6">
                 <MarketStats data={marketData} />
-                <Panel title="流动性动态" subtitle="做市商实时对冲敞口 (Spot GEX)" icon="fa-solid fa-chart-area">
-                  <GexChart data={history.slice(-60)} />
+                <Panel title="流动性动态" subtitle="做市商实时对冲敞口 & 成交量墙" icon="fa-solid fa-chart-area">
+                  <GexChart 
+                    data={history.slice(-60)} 
+                    priceLevels={marketData?.price_levels}
+                    volatilityTrigger={marketData?.volatility_trigger}
+                    hvnPrice={marketData?.hvn_price}
+                  />
                 </Panel>
               </div>
               <div className="xl:col-span-1 h-full">
                 <Panel title="情报流" subtitle="AI 策略信号" icon="fa-solid fa-satellite" className="h-full">
-                  <AlertList alerts={alerts} />
+                  <AlertList 
+                    alerts={alerts} 
+                    onManualPush={pushToDiscord} 
+                    lastPushSuccess={lastPushSuccess}
+                  />
                 </Panel>
               </div>
             </div>
@@ -330,15 +409,8 @@ const App: React.FC = () => {
           )}
 
           {activeTab === 'strategy' && (
-            <div className="max-w-4xl mx-auto py-12">
-               <Panel title="指挥指令" subtitle="核心交易逻辑 (UW API 原理)" icon="fa-solid fa-shield-halved">
-                  <div className="space-y-6">
-                    <p className="text-sm text-zinc-400 leading-relaxed">
-                      当 <b className="accent-text">Spot GEX</b> 为正时，做市商在股价下跌时买入，上涨时卖出，从而<b>抑制波动性</b>。
-                      当 <b className="text-rose-400">Spot GEX</b> 为负时，做市商在股价上涨时买入，下跌时卖出，从而<b>加剧波动性</b>。
-                    </p>
-                  </div>
-               </Panel>
+            <div className="h-full">
+               <StrategyLibrary />
             </div>
           )}
 

@@ -22,17 +22,14 @@ const HistoryExplorer: React.FC<HistoryExplorerProps> = ({ history }) => {
       const gex = point.gamma_per_one_percent_move_vol;
       const pointTime = new Date(point.time).getTime();
       
-      // Regime Filter
       const matchesRegime = 
         regimeFilter === 'ALL' || 
         (regimeFilter === 'POSITIVE' && gex > 0) || 
         (regimeFilter === 'NEGATIVE' && gex < 0);
       
-      // Search Query Filter
       const matchesSearch = point.price.toString().includes(searchQuery) || 
                             new Date(point.time).toLocaleTimeString().includes(searchQuery);
 
-      // Date Range Filter
       const startLimit = startDate ? new Date(startDate).getTime() : 0;
       const endLimit = endDate ? new Date(endDate).getTime() : Infinity;
       const matchesDateRange = pointTime >= startLimit && pointTime <= endLimit;
@@ -82,10 +79,8 @@ const HistoryExplorer: React.FC<HistoryExplorerProps> = ({ history }) => {
           </div>
         </div>
 
-        {/* 过滤器网格 */}
         <div className="mt-6 space-y-4">
           <div className="flex flex-wrap items-end gap-4">
-            {/* 时间范围过滤器 */}
             <div className="flex flex-col gap-1.5">
               <label className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">审计起始时间</label>
               <input 
@@ -124,69 +119,49 @@ const HistoryExplorer: React.FC<HistoryExplorerProps> = ({ history }) => {
               </div>
             </div>
 
-            <div className="relative flex-1 min-w-[200px]">
-              <label className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block mb-1.5">快速检索</label>
-              <div className="relative">
-                <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600 text-[9px]"></i>
-                <input 
-                  type="text" 
-                  placeholder="价格、时间或关键词..." 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-black/40 border border-zinc-900 rounded-lg pl-9 pr-4 py-1.5 text-[9px] text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
-                />
-              </div>
+            <div className="relative flex-1">
+              <label className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block mb-1.5">价格/时间搜索</label>
+              <input 
+                type="text" 
+                placeholder="搜索价格或时间..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-black/40 border border-zinc-900 rounded-lg px-3 py-1.5 text-[9px] text-zinc-400 focus:outline-none focus:border-emerald-500/30 font-mono transition-colors"
+              />
             </div>
-
+            
             <button 
               onClick={resetFilters}
-              className="px-4 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-[8px] font-black text-zinc-500 uppercase hover:bg-zinc-800 hover:text-zinc-300 transition-all h-[30px]"
+              className="px-4 py-1.5 bg-zinc-900 text-zinc-500 border border-zinc-800 rounded-lg text-[9px] font-black uppercase tracking-widest hover:text-zinc-300 transition-colors h-[30px]"
             >
               重置
             </button>
-            
-            <div className="px-4 py-1.5 bg-black/20 border border-zinc-900 rounded-lg text-[10px] font-mono text-emerald-500/80 h-[30px] flex items-center">
-              {filteredHistory.length} 条记录
-            </div>
           </div>
         </div>
       </div>
 
       <div className="flex-1 overflow-hidden p-6">
         {viewMode === 'chart' ? (
-          <div className="h-full w-full">
+          <div className="h-full">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={[...filteredHistory].reverse()}>
+              <ComposedChart data={filteredHistory}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
                 <XAxis 
                   dataKey="time" 
-                  tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  tickFormatter={(time) => new Date(time).toLocaleTimeString()}
                   stroke="#3f3f46"
                   fontSize={9}
                   axisLine={false}
                 />
-                <YAxis 
-                  yAxisId="left"
-                  stroke="#3f3f46"
-                  fontSize={9}
-                  axisLine={false}
-                  domain={['auto', 'auto']}
-                  tickFormatter={(val) => `$${val.toFixed(0)}`}
-                />
-                <YAxis 
-                  yAxisId="right"
-                  orientation="right"
-                  stroke="#3f3f46"
-                  fontSize={9}
-                  axisLine={false}
-                  tickFormatter={(val) => `${(val / 1e6).toFixed(0)}M`}
-                />
+                <YAxis yAxisId="left" orientation="left" stroke="#3f3f46" fontSize={9} axisLine={false} domain={['auto', 'auto']} />
+                <YAxis yAxisId="right" orientation="right" stroke="#3f3f46" fontSize={9} axisLine={false} domain={['auto', 'auto']} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#09090b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '9px' }}
+                  contentStyle={{ backgroundColor: '#09090b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '10px' }}
+                  itemStyle={{ padding: '2px 0' }}
                 />
-                <Area yAxisId="left" type="monotone" dataKey="price" stroke="#10b981" fill="#10b981" fillOpacity={0.05} strokeWidth={1} dot={false} />
+                <Area yAxisId="left" type="monotone" dataKey="price" stroke="#10b981" fill="#10b981" fillOpacity={0.05} strokeWidth={2} dot={false} />
                 <Bar yAxisId="right" dataKey="gamma_per_one_percent_move_vol">
-                  {([...filteredHistory].reverse()).map((entry, index) => (
+                  {filteredHistory.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.gamma_per_one_percent_move_vol > 0 ? '#3b82f6' : '#f43f5e'} fillOpacity={0.4} />
                   ))}
                 </Bar>
@@ -194,42 +169,51 @@ const HistoryExplorer: React.FC<HistoryExplorerProps> = ({ history }) => {
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="h-full overflow-auto custom-scrollbar border border-zinc-900/50 rounded-xl bg-black/20">
+          <div className="h-full overflow-y-auto custom-scrollbar">
             <table className="w-full text-left border-collapse">
-              <thead className="sticky top-0 bg-zinc-950 z-10 border-b border-zinc-900">
-                <tr>
-                  <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest text-zinc-600">审计时间戳</th>
-                  <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest text-zinc-600">标的价格</th>
-                  <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest text-zinc-600 text-right">GEX 流量敞口</th>
-                  <th className="px-4 py-3 text-[8px] font-black uppercase tracking-widest text-zinc-600 text-center">状态</th>
+              <thead>
+                <tr className="border-b border-zinc-900">
+                  <th className="py-3 px-4 text-[9px] font-black text-zinc-500 uppercase tracking-widest">时间戳</th>
+                  <th className="py-3 px-4 text-[9px] font-black text-zinc-500 uppercase tracking-widest text-right">标的价格</th>
+                  <th className="py-3 px-4 text-[9px] font-black text-zinc-500 uppercase tracking-widest text-right">0DTE GEX (VOL)</th>
+                  <th className="py-3 px-4 text-[9px] font-black text-zinc-500 uppercase tracking-widest text-right">0DTE GEX (OI)</th>
+                  <th className="py-3 px-4 text-[9px] font-black text-zinc-500 uppercase tracking-widest text-right">对冲状态</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-900 font-mono text-[10px]">
+              <tbody>
                 {filteredHistory.map((point, idx) => (
-                  <tr key={idx} className="hover:bg-zinc-900/40 transition-colors">
-                    <td className="px-4 py-2 text-zinc-500">{new Date(point.time).toLocaleString()}</td>
-                    <td className="px-4 py-2 text-zinc-100 font-bold">${point.price.toFixed(2)}</td>
-                    <td className={`px-4 py-2 text-right font-bold ${point.gamma_per_one_percent_move_vol > 0 ? 'text-blue-400' : 'text-rose-400'}`}>
+                  <tr key={idx} className="border-b border-zinc-900/50 hover:bg-white/5 transition-colors">
+                    <td className="py-3 px-4 text-[10px] font-mono text-zinc-400">{new Date(point.time).toLocaleString()}</td>
+                    <td className="py-3 px-4 text-[10px] font-mono text-white text-right font-bold">${point.price.toFixed(2)}</td>
+                    <td className={`py-3 px-4 text-[10px] font-mono text-right font-bold ${point.gamma_per_one_percent_move_vol >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
                       {formatGex(point.gamma_per_one_percent_move_vol)}
                     </td>
-                    <td className="px-4 py-2 text-center">
-                      <span className={`px-2 py-0.5 rounded text-[7px] font-black uppercase ${point.gamma_per_one_percent_move_vol > 0 ? 'bg-blue-500/10 text-blue-500' : 'bg-rose-500/10 text-rose-500'}`}>
-                        {point.gamma_per_one_percent_move_vol > 0 ? '看多' : '看空'}
-                      </span>
+                    <td className="py-3 px-4 text-[10px] font-mono text-right text-blue-300">
+                      {formatGex(point.gamma_per_one_percent_move_oi)}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                       <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded border ${
+                         point.gamma_per_one_percent_move_vol >= 0 ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                       }`}>
+                         {point.gamma_per_one_percent_move_vol >= 0 ? 'Glue' : 'Fuel'}
+                       </span>
                     </td>
                   </tr>
                 ))}
-                {filteredHistory.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-20 text-center text-zinc-700 uppercase tracking-widest text-[9px]">
-                      未在所选时间范围内发现匹配审计日志
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
         )}
+      </div>
+
+      <div className="p-4 border-t border-zinc-900 bg-zinc-900/10 flex justify-between items-center">
+        <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">
+          审计记录: {filteredHistory.length} / {history.length}
+        </span>
+        <div className="flex gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-500/50 shadow-[0_0_8px_rgba(16,185,129,0.3)]"></div>
+          <div className="w-2 h-2 rounded-full bg-zinc-800"></div>
+        </div>
       </div>
     </div>
   );

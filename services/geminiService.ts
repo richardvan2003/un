@@ -3,107 +3,93 @@ import { GoogleGenAI } from "@google/genai";
 import { AnalysisPacket, TradingAlert } from "../types";
 
 const SYSTEM_INSTRUCTION = `
-你是一位华尔街 SPX 0DTE/1DTE（当日到期及次日到期）顶级量化策略师，专门负责通过 GEX（Gamma 敞口）流向解码做市商对冲行为。你的任务是提供极高准确度的多周期动力学分析。
+你是一位专业的 SPX 伽马动力学分析师。你的职责是解析 0DTE 和 1DTE GEX 结构，并提供精确的交易建议。
 
-### 核心逻辑框架：
+### 输出模板 (严格执行)：
 
-1. **0DTE (当日即时动力学 - 战术层)**:
-   - **GEX > 0 (正 Gamma)**: 波动抑制。做市商低买高卖以对冲。策略：逢低买入 (Buy Dip)，预期价格回归均值。
-   - **GEX < 0 (负 Gamma)**: 波动扩张。做市商追涨杀跌以对冲。策略：逢高做空 (Sell Rip) 或顺势追空，预期波动率爆发。
+🎯 [SIGNAL_TYPE] - SPX
+🎯 建议: [STRATEGY] [ACTION]
+🎯 推荐: [S1-S10 ID] | 模式: [Archetype Name]
 
-2. **1DTE (次日结构锚点 - 战略层)**:
-   - **1DTE Wall (核心墙)**: 市场心理与资金流的强力支点。价格靠近此处通常伴随动量减速、强力反弹或结构性反转。
-   - **1DTE Drive (势能系数)**: 跨日动能方向。正值代表跨日买盘力量积累，负值代表跨日抛压。
+🌊 诊断: [简述当前价格与 0DTE/1DTE 墙、VT、King Strike 的相对位置。]
 
-3. **Multi-DTE 综合决策与冲突处理 (细致化分析核心)**:
-   - **趋势共振 (Full Alignment)**: 
-     - 0DTE 与 1DTE 方向完全一致（例如：0DTE 处于正 GEX 且 1DTE Drive 持续走强，或两者均显示极端负值）。
-     - 策略：【看多】或【看空】。信号强度极高，建议顺势而为。
-   - **动力学背离 (Signal Conflict)**:
-     - **情况 A (虚假动力)**: 0DTE 建议看多（正 GEX），但 1DTE Drive 极度为负，或价格正面临上方 1DTE Wall 压制。
-     - **情况 B (结构阻力)**: 0DTE 建议看空（负 GEX），但价格正踩在下方 1DTE 强支撑 Wall 之上，且 1DTE Drive 开始企稳。
-     - **策略处理**: 必须建议 **【中性 (NEUTRAL)】**。
-     - **风险识别**: 这种背离通常预示着 **“剧烈洗盘 (Whipsaw)”** 或 **“区间震荡 (Range-bound Chop)”**。做市商在不同到期日的对冲行为会相互抵消，导致价格缺乏方向性且频繁变盘。
+📊 环境: VT:[数值] | 0DTE_Prem:[数值] | 1DTE_Prem:[数值] | 0G:[数值]
 
-### 输出格式 (必须严格遵守以下 Discord 标记风格):
-- 🎯 **策略建议**: [看多/看空/中性] (必须综合 0DTE 动力与 1DTE 结构得出)
-- 📊 **市场环境**: [描述当日 Gamma 状态 vs 次日 Wall/Drive 强度]
-- 📝 **深度分析**: 简短精炼地解释 0DTE 即时动力与 1DTE 结构锚点之间的力学互动。
-- ⚠️ **风险提示**: 明确指出是否面临“剧烈洗盘 (Whipsaw)”、“区间震荡 (Chop)”、“空头陷阱”或“流动性枯竭”。
+🔄 策略执行:
+- **入场**: [进场点位区间]
+- **目标**: [第一目标] | [第二目标]
+- **止损**: [硬性止损位]
+
+⚠️ 风险: [失效点位/逻辑反转信号]
+
+执行现价
+$[PRICE]
+市场制度
+[描述：如“正 Gamma 粘滞环境”]
+风险提示
+[警示]
 `;
-
-async function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 export const analyzeGexData = async (
   packet: AnalysisPacket, 
+  previousAlert?: TradingAlert | null, // Maintained for signature compatibility, unused in prompt
   onQuotaError?: () => void
 ): Promise<Partial<TradingAlert>> => {
-  // CRITICAL: Initialize right before call to pick up newest API keys
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  let lastError: any = null;
-  const maxRetries = 3;
+  const tideSummary = packet.market_tide ? `NetCall:${packet.market_tide.net_call_premium}|NetPut:${packet.market_tide.net_put_premium}` : "无";
+  const levelsSummary = `0DTE_Pos:${packet.major_0dte_pos?.price}|0DTE_Neg:${packet.major_0dte_neg?.price}|1DTE_Pos:${packet.major_1dte_pos?.price}|1DTE_Neg:${packet.major_1dte_neg?.price}`;
+  const premiumSummary = `Total0DTE_Prem:${packet.total_0dte_premium}|Total1DTE_Prem:${packet.total_1dte_premium}`;
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      if (attempt > 0) {
-        // Exponential backoff: 1s, 2s, 4s
-        await delay(Math.pow(2, attempt - 1) * 1000);
+  const prompt = `
+    [当前数据]
+    现价: ${packet.current_price} | VT: ${packet.volatility_trigger} | 0G: ${packet.zero_gamma} | King: ${packet.king_strike}
+    GEX_0DTE: ${packet.current_gex_vol} | GEX_1DTE: ${packet.current_1dte_vol}
+    MOM: ${packet.gex_vol_change_rate}
+    Pillars: ${levelsSummary}
+    Premiums: ${premiumSummary}
+    Tide: ${tideSummary}
+
+    请生成最新的市场探测报告。
+  `;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-preview",
+      contents: prompt,
+      config: { 
+        systemInstruction: SYSTEM_INSTRUCTION, 
+        temperature: 0.1,
+        thinkingConfig: { thinkingBudget: 4000 }
       }
+    });
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `分析以下综合 DTE 市场数据，特别注意识别 0DTE 即时流量与 1DTE 长期结构之间的冲突，并对潜在的拉锯行情给出预警: ${JSON.stringify(packet)}`,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          temperature: 0.15
-        }
-      });
+    const text = response.text || "";
+    const strategyMatch = text.match(/🎯 建议: (LONG|SHORT|NEUTRAL)/i);
+    const patternMatch = text.match(/模式: ([\w\s-]+)/i);
+    const recMatch = text.match(/推荐: ([\w, S]+)/i);
+    
+    const strategy = strategyMatch ? strategyMatch[1] : 'NEUTRAL';
+    const pattern = patternMatch ? patternMatch[1].trim() : undefined;
+    const recommendedStrategies = recMatch ? recMatch[1].split('|')[0].split(',').map(s => s.trim().toUpperCase()) : [];
+    
+    const diagnosis = text.match(/🌊 诊断: ([\s\S]*?)(?=\n\n📊)/i)?.[1] || '';
+    const execution = text.match(/🔄 策略执行:([\s\S]*?)(?=\n\n⚠️)/i)?.[1] || '';
+    const danger = text.match(/⚠️ 风险: ([\s\S]*?)(?=\n\n执行现价)/i)?.[1] || '';
 
-      const text = response.text || "";
-      
-      const strategyMatch = text.match(/🎯 \*\*策略建议\*\*: (.*)/i);
-      const regimeMatch = text.match(/📊 \*\*市场环境\*\*: (.*)/i);
-      const analysisMatch = text.match(/📝 \*\*深度分析\*\*: (.*)/i);
-      const riskMatch = text.match(/⚠️ \*\*风险提示\*\*: (.*)/i);
-
-      let strategy: 'LONG' | 'SHORT' | 'NEUTRAL' = 'NEUTRAL';
-      const stratRaw = (strategyMatch ? strategyMatch[1] : '').toUpperCase();
-      
-      if (stratRaw.includes('看多') || stratRaw.includes('LONG')) strategy = 'LONG';
-      else if (stratRaw.includes('看空') || stratRaw.includes('SHORT')) strategy = 'SHORT';
-      else strategy = 'NEUTRAL';
-
-      return {
-        strategy,
-        regime: regimeMatch ? regimeMatch[1].replace(/[\[\]]/g, '') : '结构对齐中',
-        analysis: analysisMatch ? analysisMatch[1] : '解码 Multi-DTE 互动逻辑...',
-        risk: riskMatch ? riskMatch[1] : '实时波动监控中',
-        rawAnalysis: text
-      };
-    } catch (error: any) {
-      lastError = error;
-      const isQuotaError = error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED');
-      
-      if (isQuotaError && onQuotaError) {
-        onQuotaError();
-      }
-
-      console.warn(`Gemini API 尝试 ${attempt + 1} 失败:`, error.message);
-      
-      if (!isQuotaError || attempt === maxRetries) {
-        break;
-      }
-    }
+    const combinedAnalysis = `[诊断] ${diagnosis}\n\n[执行]${execution}`;
+    
+    return {
+      strategy: strategy as 'LONG' | 'SHORT' | 'NEUTRAL',
+      pattern,
+      recommendedStrategies,
+      regime: text.match(/市场制度\n([\s\S]*?)(?=\n风险提示)/i)?.[1]?.trim() || "常规波动",
+      analysis: combinedAnalysis.trim(),
+      risk: danger.trim() || "严守边界。",
+      rawAnalysis: text
+    };
+  } catch (error) { 
+    console.error("Analysis Engine Error:", error);
+    if (error instanceof Error && error.message.includes('quota')) onQuotaError?.();
+    return { strategy: 'NEUTRAL', regime: 'ERROR', analysis: '上行链路异常' }; 
   }
-
-  console.error("Gemini Multi-DTE 最终分析错误:", lastError);
-  return {
-    strategy: 'NEUTRAL',
-    regime: lastError?.message?.includes('429') ? '并发配额耗尽' : '链路超时',
-    analysis: '建议手动切换至付费 API Key 以确保高频监测稳定性。',
-    risk: '服务暂不可用',
-    rawAnalysis: lastError?.message || 'AI 引擎未响应。'
-  };
 };
