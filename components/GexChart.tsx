@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, 
   ComposedChart, Area, Bar, Cell, Line, Label
 } from 'recharts';
-import { GexDataPoint, PriceLevelVolume } from '../types';
+import { GexDataPoint, PriceLevelVolume, TopStrike } from '../types';
 
 interface GexChartProps {
   data: GexDataPoint[];
@@ -12,108 +12,95 @@ interface GexChartProps {
   volatilityTrigger?: number;
   hvnPrice?: number;
   zeroGamma?: number;
+  kingStrike?: number;
+  topOiStrikes?: TopStrike[];
+  topDarkPoolStrikes?: TopStrike[];
 }
 
-const lerpColor = (a: string, b: string, amount: number): string => {
-  const ah = parseInt(a.replace(/#/g, ''), 16);
-  const ar = ah >> 16, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
-  const bh = parseInt(b.replace(/#/g, ''), 16);
-  const br = bh >> 16, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
-  const rr = ar + amount * (br - ar);
-  const rg = ag + amount * (bg - ag);
-  const rb = ab + amount * (bb - ab);
-
-  return '#' + ((1 << 24) + (Math.round(rr) << 16) + (Math.round(rg) << 8) + Math.round(rb)).toString(16).slice(1);
+const formatValue = (val: number) => {
+  const absVal = Math.abs(val);
+  if (absVal >= 1e9) return `${(val / 1e9).toFixed(1)}B`;
+  if (absVal >= 1e6) return `${(val / 1e6).toFixed(1)}M`;
+  if (absVal >= 1e3) return `${(val / 1e3).toFixed(0)}K`;
+  return val.toFixed(0);
 };
 
+// 支柱标签渲染组件
+const CustomPillarLabel = (props: any) => {
+  const { y, viewBox, text, color, textColor, price, offset = 0 } = props;
+  const width = 120;
+  const height = 20;
+  const finalY = y + offset - height / 2;
+
+  return (
+    <g transform={`translate(${viewBox.width - width - 5}, ${finalY})`}>
+      <rect width={width} height={height} rx="4" fill={color} className="filter drop-shadow-md" />
+      <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill={textColor} fontSize="9" fontWeight="900" className="font-mono uppercase tracking-tighter">
+        {text}: {price}
+      </text>
+    </g>
+  );
+};
+
+// 通用坐标轴高亮标签组件 (Callout)
+const AxisHighlight = (props: any) => {
+  const { viewBox, value, color, labelPrefix, side = 'right', isPrice = false, labelWidth = 75 } = props;
+  const { x, y, width } = viewBox;
+  
+  const labelX = side === 'right' ? x + width + 5 : x - labelWidth - 5;
+  const rectWidth = labelWidth;
+  const textColor = color === '#000' || color === '#facc15' || color === '#f59e0b' ? '#000' : '#fff';
+  const displayValue = isPrice ? `$${value.toFixed(1)}` : formatValue(value);
+
+  return (
+    <g transform={`translate(${labelX}, ${y - 10})`}>
+      <rect width={rectWidth} height={20} rx="4" fill={color} className="filter drop-shadow-lg shadow-black" />
+      <text 
+        x={rectWidth / 2} 
+        y="14" 
+        textAnchor="middle" 
+        fill={textColor} 
+        fontSize="9" 
+        fontWeight="900" 
+        className="font-mono tracking-tighter"
+      >
+        {labelPrefix}: {displayValue}
+      </text>
+    </g>
+  );
+};
+
+// 专业级 Tooltip
 const CustomTooltip = (props: any) => {
-  const { active, payload, label, hvnPrice, topGexLevels } = props;
+  const { active, payload, label } = props;
   if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    const price = data.price;
-    const gex0dte = data.gamma_per_one_percent_move_vol;
-    const momentum = data.gex_vol_change_rate || 0;
-    const gex1dte = data.gamma_1dte_vol || 0;
-    const isPositiveGex = gex0dte >= 0;
-
-    const formatVal = (val: number) => {
-      const absVal = Math.abs(val);
-      if (absVal >= 1e9) return `${(val / 1e9).toFixed(2)}B`;
-      if (absVal >= 1e6) return `${(val / 1e6).toFixed(2)}M`;
-      if (absVal >= 1e3) return `${(val / 1e3).toFixed(1)}K`;
-      return val.toFixed(0);
-    };
-
-    const distToHvn = hvnPrice ? (price - hvnPrice).toFixed(1) : null;
+    const d = payload.find((p: any) => p.dataKey === 'price')?.payload || payload[0].payload;
+    const isPos = d.gamma_per_one_percent_move_vol >= 0;
 
     return (
-      <div className="bg-zinc-950/98 border border-zinc-800 p-4 rounded-2xl shadow-2xl backdrop-blur-2xl min-w-[320px] z-[100] ring-1 ring-white/5 font-mono">
-        <div className="flex items-center justify-between mb-4 border-b border-zinc-900 pb-2">
-          <div className="flex flex-col">
-            <span className="text-[7px] font-black text-zinc-500 uppercase tracking-[0.2em]">采样时间 (Timestamp)</span>
-            <span className="text-[11px] font-mono text-emerald-500/90 font-bold">
-              {new Date(label).toLocaleString()}
-            </span>
-          </div>
-          <div className={`px-2 py-0.5 rounded text-[7px] font-black uppercase border ${
-            isPositiveGex ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-          }`}>
-            {isPositiveGex ? 'GLUE (流动性粘滞)' : 'FUEL (下行压力加速)'}
-          </div>
+      <div className="bg-zinc-950/95 border border-zinc-800 p-4 rounded-xl shadow-2xl backdrop-blur-xl min-w-[260px] font-mono ring-1 ring-white/5">
+        <div className="flex justify-between items-center mb-3 border-b border-zinc-800 pb-2">
+           <span className="text-[10px] font-black text-zinc-500 uppercase">{new Date(label).toLocaleTimeString()}</span>
+           <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${isPos ? 'bg-blue-500/10 text-blue-400' : 'bg-rose-500/10 text-rose-400'}`}>
+             {isPos ? 'GLUE 模式' : 'FUEL 模式'}
+           </span>
         </div>
-        
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5 mb-1">
-              <div className="w-1 h-2 bg-blue-500 rounded-full"></div>
-              <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">市场快照</span>
-            </div>
-            <div className="flex justify-between items-center px-2">
-              <span className="text-[9px] font-bold text-zinc-400 uppercase">标的价格</span>
-              <span className="text-xs font-mono font-black text-white">${price.toFixed(2)}</span>
-            </div>
-            {distToHvn && (
-               <div className="flex justify-between items-center px-2">
-                <span className="text-[9px] font-bold text-emerald-500/70 uppercase">距 HVN 中枢</span>
-                <span className={`text-[10px] font-mono font-black ${parseFloat(distToHvn) > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                  {parseFloat(distToHvn) > 0 ? '+' : ''}{distToHvn} pts
-                </span>
-              </div>
-            )}
-          </div>
+        <div className="space-y-1.5">
+          <div className="flex justify-between"><span className="text-[9px] text-zinc-500 font-bold uppercase">标的价格</span><span className="text-sm font-black text-white">${d.price.toFixed(2)}</span></div>
+          <div className="flex justify-between"><span className="text-[9px] text-zinc-500 font-bold uppercase">0DTE GEX</span><span className={`text-[11px] font-black ${isPos ? 'text-blue-400' : 'text-rose-400'}`}>{formatValue(d.gamma_per_one_percent_move_vol)}</span></div>
+          
+          <div className="pt-2 mt-2 border-t border-zinc-900 grid grid-cols-2 gap-x-4 gap-y-1">
+            <span className="text-[8px] text-zinc-600 font-bold uppercase">1DTE GEX</span>
+            <span className="text-[10px] font-bold text-indigo-400 text-right">{formatValue(d.gamma_1dte_vol || 0)}</span>
+            
+            <span className="text-[8px] text-zinc-600 font-bold uppercase">Tide (潮汐)</span>
+            <span className="text-[10px] font-bold text-amber-500 text-right">{formatValue(d.net_tide || 0)}</span>
+            
+            <span className="text-[8px] text-zinc-600 font-bold uppercase">Momentum</span>
+            <span className="text-[10px] font-bold text-yellow-400 text-right">{formatValue(d.gex_vol_change_rate || 0)}</span>
 
-          <div className="space-y-1.5 pt-2 border-t border-zinc-900">
-            <div className="flex items-center gap-1.5 mb-2">
-              <div className="w-1 h-2 bg-amber-500 rounded-full"></div>
-              <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Top 5 敞口节点</span>
-            </div>
-            <div className="grid grid-cols-1 gap-1">
-              {topGexLevels?.map((level: PriceLevelVolume, idx: number) => (
-                <div key={idx} className="flex justify-between items-center px-2 py-0.5 rounded bg-zinc-900/50">
-                  <span className={`text-[8px] font-black font-mono ${idx === 0 ? 'text-amber-400' : 'text-zinc-500'}`}>
-                    ${level.price}
-                  </span>
-                  <span className={`text-[8px] font-mono font-bold ${level.net_gex >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
-                    {formatVal(level.net_gex)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5 pt-2 border-t border-zinc-900">
-            <div className="flex justify-between items-center px-2">
-              <span className="text-[9px] font-bold text-blue-400 uppercase">0DTE GEX</span>
-              <span className={`text-xs font-mono font-black ${gex0dte >= 0 ? 'text-blue-400' : 'text-rose-500'}`}>{formatVal(gex0dte)}</span>
-            </div>
-            <div className="flex justify-between items-center px-2">
-              <span className="text-[9px] font-bold text-indigo-400 uppercase">1DTE GEX</span>
-              <span className={`text-xs font-mono font-black ${gex1dte >= 0 ? 'text-indigo-400' : 'text-rose-400'}`}>{formatVal(gex1dte)}</span>
-            </div>
-            <div className="flex justify-between items-center px-2">
-              <span className="text-[9px] font-bold text-yellow-400 uppercase">变化量 (MOM)</span>
-              <span className={`text-xs font-mono font-black ${momentum >= 0 ? 'text-yellow-400' : 'text-rose-500'}`}>{formatVal(momentum)}</span>
-            </div>
+            <span className="text-[8px] text-zinc-600 font-bold uppercase">Velocity</span>
+            <span className="text-[10px] font-bold text-zinc-400 text-right">{formatValue(d.gex_velocity || 0)}</span>
           </div>
         </div>
       </div>
@@ -122,203 +109,284 @@ const CustomTooltip = (props: any) => {
   return null;
 };
 
-const GexChart: React.FC<GexChartProps> = ({ data, priceLevels = [], volatilityTrigger, hvnPrice, zeroGamma }) => {
-  const [show1Dte, setShow1Dte] = useState(true);
-  const [show0Dte, setShow0Dte] = useState(true);
-  const [showMomentum, setShowMomentum] = useState(true);
-  const [showTide, setShowTide] = useState(false);
+const GexChart: React.FC<GexChartProps> = ({ 
+  data, 
+  priceLevels = [], 
+  volatilityTrigger, 
+  hvnPrice, 
+  zeroGamma, 
+  kingStrike,
+  topOiStrikes = [],
+  topDarkPoolStrikes = []
+}) => {
+  const [showProfile, setShowProfile] = useState(true);
+  
+  // 核心支柱配置
+  const rawPillars = useMemo(() => {
+    const p = [];
+    if (volatilityTrigger) p.push({ price: volatilityTrigger, text: "VT TRIGGER", color: "#f43f5e", textColor: "#fff" });
+    if (kingStrike) p.push({ price: kingStrike, text: "KING STRIKE", color: "#f59e0b", textColor: "#000" });
+    if (zeroGamma) p.push({ price: zeroGamma, text: "0G FLIP", color: "#3f3f46", textColor: "#fff" });
+    if (hvnPrice) p.push({ price: hvnPrice, text: "HVN NODE", color: "#10b981", textColor: "#000" });
+    return p;
+  }, [volatilityTrigger, hvnPrice, zeroGamma, kingStrike]);
 
-  const { topGexLevels, kingStrike } = useMemo(() => {
-    const sorted = [...(priceLevels || [])].sort((a, b) => Math.abs(b.net_gex) - Math.abs(a.net_gex));
+  // 获取最新数值用于实时坐标高亮
+  const metrics = useMemo(() => {
+    if (!data.length) return { price: 0, momentum: 0, tide: 0, gex: 0 };
+    const last = data[data.length - 1];
     return {
-      topGexLevels: sorted.slice(0, 5),
-      kingStrike: sorted[0]
+      price: last.price,
+      momentum: last.gex_vol_change_rate || 0,
+      tide: last.net_tide || 0,
+      gex: last.gamma_per_one_percent_move_vol || 0
     };
-  }, [priceLevels]);
+  }, [data]);
 
-  const formatVal = (val: number) => {
-    const absVal = Math.abs(val);
-    if (absVal >= 1e9) return `${(val / 1e9).toFixed(1)}B`;
-    if (absVal >= 1e6) return `${(val / 1e6).toFixed(1)}M`;
-    if (absVal >= 1e3) return `${(val / 1e3).toFixed(1)}K`;
-    return val.toFixed(0);
-  };
-
+  // 自适应坐标轴范围
   const { domainMin, domainMax } = useMemo(() => {
-    if (data.length === 0) return { domainMin: 'auto', domainMax: 'auto' };
+    if (data.length === 0) return { domainMin: 5000, domainMax: 5500 };
     const prices = data.map(d => d.price);
-    let min = Math.min(...prices);
-    let max = Math.max(...prices);
-    
-    if (volatilityTrigger) { min = Math.min(min, volatilityTrigger); max = Math.max(max, volatilityTrigger); }
-    if (hvnPrice) { min = Math.min(min, hvnPrice); max = Math.max(max, hvnPrice); }
-    if (zeroGamma) { min = Math.min(min, zeroGamma); max = Math.max(max, zeroGamma); }
-    topGexLevels.forEach(l => { min = Math.min(min, l.price); max = Math.max(max, l.price); });
+    const minP = Math.min(...prices, ...rawPillars.map(p => p.price));
+    const maxP = Math.max(...prices, ...rawPillars.map(p => p.price));
+    const pad = (maxP - minP) * 0.3;
+    return { domainMin: Math.floor(minP - pad), domainMax: Math.ceil(maxP + pad) };
+  }, [data, rawPillars]);
 
-    const padding = (max - min) * 0.45;
-    return { domainMin: min - padding, domainMax: max + padding };
-  }, [data, volatilityTrigger, hvnPrice, zeroGamma, topGexLevels]);
+  // 计算 Y 轴 Gamma 剖面分布 (Profile) - 仅显示 Top 6 读数，并标注 Top 1
+  const { strikeProfile, top1Strike } = useMemo(() => {
+    const sorted = [...priceLevels].sort((a, b) => Math.abs(b.net_gex) - Math.abs(a.net_gex));
+    const top6 = sorted.slice(0, 6)
+      .map(l => ({
+        strike: l.price,
+        gex: l.net_gex,
+        oi: l.open_interest || 0,
+        isMajor: l.price === kingStrike || l.price === zeroGamma,
+        isTop1: sorted.length > 0 && l.price === sorted[0].price
+      }))
+      .filter(l => l.strike >= domainMin && l.strike <= domainMax)
+      .sort((a, b) => a.strike - b.strike);
 
-  const maxAbsMetrics = useMemo(() => {
-    if (data.length === 0) return 1;
+    return { strikeProfile: top6, top1Strike: sorted.length > 0 ? sorted[0].price : null };
+  }, [priceLevels, domainMin, domainMax, kingStrike, zeroGamma]);
+
+  const maxAbsGexScale = useMemo(() => {
     const vals = data.flatMap(d => [
       Math.abs(d.gamma_per_one_percent_move_vol || 0),
       Math.abs(d.gamma_1dte_vol || 0),
-      Math.abs(d.gex_vol_change_rate || 0),
-      Math.abs(d.net_tide || 0) * 0.5
+      Math.abs(d.net_tide || 0),
+      Math.abs(d.gex_vol_change_rate || 0)
     ]);
-    return Math.max(...vals, 1e6); // Default min scale of 1M
+    return Math.max(...vals, 1e6);
   }, [data]);
 
-  const getGexColor = (value: number) => {
-    const intensity = Math.min(Math.abs(value) / (maxAbsMetrics * 0.8), 1);
-    const isPositive = value >= 0;
-    
-    if (isPositive) {
-      return lerpColor('#60a5fa', '#1e3a8a', intensity);
-    } else {
-      return lerpColor('#fb7185', '#881337', intensity);
-    }
-  };
-
   return (
-    <div className="bg-zinc-900/30 p-6 rounded-2xl border border-zinc-800/50 h-[450px] relative overflow-hidden group font-mono">
-      <div className="flex justify-between items-center mb-6 relative z-30">
+    <div className="bg-zinc-900/20 p-6 rounded-2xl border border-zinc-800/50 h-[560px] relative overflow-hidden flex flex-col font-mono">
+      {/* 头部控制栏 */}
+      <div className="flex justify-between items-center mb-6">
         <div>
-          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-zinc-400 flex items-center gap-2">
-            <i className="fa-solid fa-layer-group text-emerald-500"></i>
-            对冲结构分析矩阵 (Gamma Matrix)
+          <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 
+            对冲结构分析矩阵 (Gamma Matrix v3.0)
           </h3>
-          <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1 tracking-widest">CRITICAL PRICE PILLARS</p>
+          <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1 tracking-widest">
+            Top 1 Node Highlighting & Coordinate Precision Alignment
+          </p>
         </div>
-        <div className="flex gap-1 flex-wrap justify-end max-w-[60%]">
-           <button onClick={() => setShow0Dte(!show0Dte)} className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border ${show0Dte ? 'bg-blue-500/20 border-blue-500/50 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.2)]' : 'bg-zinc-900 border-zinc-800 text-zinc-600'}`}>0DTE</button>
-           <button onClick={() => setShow1Dte(!show1Dte)} className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border ${show1Dte ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400 shadow-[0_0_10px_rgba(129,140,248,0.2)]' : 'bg-zinc-900 border-zinc-800 text-zinc-600'}`}>1DTE</button>
-           <button onClick={() => setShowMomentum(!showMomentum)} className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border ${showMomentum ? 'bg-yellow-500/20 border-yellow-500/50 text-yellow-400' : 'bg-zinc-900 border-zinc-800 text-zinc-600'}`}>MOM</button>
-           <button onClick={() => setShowTide(!showTide)} className={`px-2 py-1 rounded-lg text-[7px] font-black uppercase transition-all border ${showTide ? 'bg-amber-400/20 border-amber-400/50 text-yellow-300' : 'bg-zinc-900 border-zinc-800 text-zinc-600'}`}>TIDE</button>
+        <div className="flex gap-2">
+           <button 
+             onClick={() => setShowProfile(!showProfile)} 
+             className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase border transition-all ${showProfile ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400' : 'bg-zinc-900 border-zinc-800 text-zinc-600'}`}
+           >
+             Targeted Profile
+           </button>
         </div>
       </div>
 
-      <div className="relative z-20 h-full">
-        <ResponsiveContainer width="100%" height="80%">
-          <ComposedChart data={data} margin={{ top: 20, right: 60, left: 20, bottom: 20 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
-            <XAxis dataKey="time" tickFormatter={(time) => new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} stroke="#3f3f46" fontSize={8} axisLine={false} tick={{ fill: '#52525b' }} />
-            
-            <YAxis 
-              yAxisId="left" 
-              orientation="left" 
-              domain={[domainMin, domainMax]} 
-              stroke="#10b981" 
-              fontSize={8} 
-              axisLine={false} 
-              tick={{ fill: '#10b981' }} 
-              tickFormatter={(val) => `$${val.toFixed(0)}`} 
-            />
-            
-            <YAxis 
-              yAxisId="right" 
-              orientation="right" 
-              stroke="#52525b" 
-              fontSize={8} 
-              axisLine={false} 
-              domain={[-maxAbsMetrics * 1.5, maxAbsMetrics * 1.5]} 
-              tick={{ fill: '#52525b' }}
-              tickFormatter={formatVal}
-            />
-            
-            <Tooltip content={<CustomTooltip hvnPrice={hvnPrice} topGexLevels={topGexLevels} />} isAnimationActive={false} cursor={{ stroke: '#3f3f46', strokeWidth: 1 }} />
-            <ReferenceLine yAxisId="right" y={0} stroke="#3f3f46" strokeWidth={1} strokeOpacity={0.5} />
-            
-            {hvnPrice && (
-              <ReferenceLine yAxisId="left" y={hvnPrice} stroke="#10b981" strokeDasharray="5 5" strokeWidth={2}>
-                <Label position="right" content={(props: any) => {
-                  const { y, viewBox } = props;
-                  return (
-                    <g transform={`translate(${viewBox.width - 150}, ${y - 18})`}>
-                      <rect width="140" height="30" rx="8" fill="#10b981" fillOpacity={0.9} />
-                      <text x="70" y="19" textAnchor="middle" fill="#000" fontSize="10" fontWeight="900" className="font-mono uppercase tracking-tighter">CORE HVN: ${hvnPrice}</text>
-                    </g>
-                  );
-                }} />
-              </ReferenceLine>
-            )}
+      <div className="flex-1 flex gap-4 relative">
+        {/* 左侧：Strike Profile (仅 Top 6 GEX 读数，高亮 Top 1) */}
+        {showProfile && (
+          <div className="w-24 h-full border-r border-zinc-900 pr-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart layout="vertical" data={strikeProfile} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                <XAxis type="number" hide domain={['auto', 'auto']} />
+                <YAxis dataKey="strike" type="number" hide domain={[domainMin, domainMax]} />
+                <Bar dataKey="gex" isAnimationActive={false}>
+                  {strikeProfile.map((entry, index) => (
+                    <Cell 
+                      key={index} 
+                      fill={entry.isTop1 ? '#facc15' : (entry.gex >= 0 ? '#3b82f6' : '#f43f5e')} 
+                      fillOpacity={entry.isTop1 ? 1 : (entry.isMajor ? 0.9 : 0.6)}
+                      stroke={entry.isTop1 ? '#fff' : 'none'}
+                      strokeWidth={entry.isTop1 ? 1 : 0}
+                    />
+                  ))}
+                </Bar>
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="absolute top-0 left-0 text-[7px] font-black text-zinc-700 uppercase vertical-text">
+               Top 6 Nodes | <span className="text-yellow-500">Gold: Top 1 GEX</span>
+            </div>
+          </div>
+        )}
 
-            {volatilityTrigger && (
-              <ReferenceLine yAxisId="left" y={volatilityTrigger} stroke="#f43f5e" strokeDasharray="4 4" strokeWidth={2}>
-                <Label position="right" content={(props: any) => {
-                  const { y, viewBox } = props;
-                  return (
-                    <g transform={`translate(${viewBox.width - 180}, ${y - 15})`}>
-                      <rect width="170" height="30" rx="8" fill="#f43f5e" fillOpacity={0.9} />
-                      <text x="85" y="19" textAnchor="middle" fill="#fff" fontSize="11" fontWeight="900" className="font-mono uppercase tracking-tighter">VT (TRIGGER): ${volatilityTrigger}</text>
-                    </g>
-                  );
-                }} />
-              </ReferenceLine>
-            )}
-
-            {zeroGamma && (
-              <ReferenceLine yAxisId="left" y={zeroGamma} stroke="#a1a1aa" strokeDasharray="2 2" strokeWidth={1.5}>
-                <Label position="left" content={(props: any) => {
-                  const { y } = props;
-                  return (
-                    <g transform={`translate(25, ${y - 12})`}>
-                      <rect width="110" height="24" rx="6" fill="#18181b" stroke="#3f3f46" />
-                      <text x="55" y="15" textAnchor="middle" fill="#a1a1aa" fontSize="9" fontWeight="900" className="font-mono uppercase tracking-tighter">ZERO G: ${zeroGamma}</text>
-                    </g>
-                  );
-                }} />
-              </ReferenceLine>
-            )}
-
-            {kingStrike && (
-              <ReferenceLine yAxisId="left" y={kingStrike.price} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="3 3">
-                <Label position="right" content={(props: any) => {
-                  const { y, viewBox } = props;
-                  return (
-                    <g transform={`translate(${viewBox.width - 130}, ${y - 12})`}>
-                      <rect width="120" height="24" rx="6" fill="#f59e0b" fillOpacity={0.95} />
-                      <text x="60" y="16" textAnchor="middle" fill="#000" fontSize="10" fontWeight="950" className="font-mono uppercase tracking-tight">KING: ${kingStrike.price}</text>
-                    </g>
-                  );
-                }} />
-              </ReferenceLine>
-            )}
-
-            <Area yAxisId="left" type="monotone" dataKey="price" stroke="#10b981" fill="#10b981" fillOpacity={0.03} strokeWidth={2} dot={false} isAnimationActive={false} />
-            
-            {show0Dte && (
-              <Bar yAxisId="right" dataKey="gamma_per_one_percent_move_vol" isAnimationActive={false} barSize={6}>
-                 {data.map((entry, index) => <Cell key={`cell-${index}`} fill={getGexColor(entry.gamma_per_one_percent_move_vol)} fillOpacity={0.85} />)}
-              </Bar>
-            )}
-            
-            {show1Dte && (
-              <Line 
-                yAxisId="right" 
-                type="monotone" 
-                dataKey="gamma_1dte_vol" 
-                stroke="#818cf8" 
-                strokeWidth={3} 
-                dot={false} 
-                isAnimationActive={false} 
-                className="drop-shadow-[0_0_10px_rgba(129,140,248,0.5)]" 
+        {/* 主视窗：Time-Series Analysis */}
+        <div className="flex-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={data} margin={{ top: 10, right: 85, left: 20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
+              <XAxis 
+                dataKey="time" 
+                tickFormatter={(t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                stroke="#52525b" fontSize={9} axisLine={false} fontWeight="bold"
               />
-            )}
-            
-            {showMomentum && <Line yAxisId="right" type="monotone" dataKey="gex_vol_change_rate" stroke="#fde047" strokeWidth={2} dot={false} isAnimationActive={false} strokeOpacity={0.7} />}
-            {showTide && <Line yAxisId="right" type="monotone" dataKey="net_tide" stroke="#fbbf24" strokeWidth={2} dot={false} isAnimationActive={false} />}
-          </ComposedChart>
-        </ResponsiveContainer>
-        
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 mt-4 px-4 py-2 bg-black/20 rounded-xl border border-zinc-900/50 backdrop-blur-sm text-[7px] font-black uppercase tracking-widest">
-           <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-blue-500 rounded-sm"></div><span>0DTE GEX</span></div>
-           <div className="flex items-center gap-1.5"><div className="w-2 h-0.5 bg-indigo-400 rounded-full shadow-[0_0_5px_rgba(129,140,248,0.5)]"></div><span>1DTE GEX</span></div>
-           <div className="flex items-center gap-1.5"><div className="w-2 h-px border-t border-dashed border-emerald-500"></div><span>CORE HVN</span></div>
-           <div className="flex items-center gap-1.5"><div className="w-2 h-px border-t border-dotted border-amber-500"></div><span>KING STRIKE</span></div>
-           <div className="flex items-center gap-1.5"><div className="w-2 h-px border-t border-dotted border-rose-500"></div><span>VOL TRIGGER (VT)</span></div>
-           <div className="flex items-center gap-1.5"><div className="w-2 h-px border-t border-dashed border-zinc-500"></div><span>ZERO GAMMA</span></div>
+              <YAxis 
+                yAxisId="price" 
+                orientation="left" 
+                domain={[domainMin, domainMax]} 
+                stroke="#71717a" fontSize={10} axisLine={false} fontWeight="900"
+                tickFormatter={(v) => `$${v}`}
+              />
+              <YAxis 
+                yAxisId="gex" 
+                orientation="right"
+                domain={[-maxAbsGexScale * 1.5, maxAbsGexScale * 1.5]} 
+                stroke="#52525b" fontSize={9} axisLine={false} fontWeight="900"
+                tickFormatter={(v) => formatValue(v)}
+              />
+              
+              <Tooltip content={<CustomTooltip />} isAnimationActive={false} cursor={{ stroke: '#27272a', strokeWidth: 1 }} />
+
+              {/* === 左侧轴高亮：实时价格 === */}
+              <ReferenceLine 
+                yAxisId="price" 
+                y={metrics.price} 
+                stroke="#10b981" 
+                strokeWidth={1} 
+                strokeDasharray="2 2" 
+                strokeOpacity={0.4}
+              >
+                <Label 
+                  content={<AxisHighlight value={metrics.price} color="#10b981" labelPrefix="PRICE" side="left" isPrice={true} labelWidth={75} />} 
+                  position="left" 
+                />
+              </ReferenceLine>
+
+              {/* === 左侧轴高亮：Top 2 OI 读数 === */}
+              {topOiStrikes.slice(0, 2).map((oi, idx) => (
+                <ReferenceLine 
+                  key={`oi-${idx}`}
+                  yAxisId="price" 
+                  y={oi.price} 
+                  stroke="transparent"
+                >
+                  <Label 
+                    content={<AxisHighlight value={oi.value} color="#818cf8" labelPrefix={`OI-${idx+1}`} side="left" labelWidth={70} />} 
+                    position="left" 
+                  />
+                </ReferenceLine>
+              ))}
+
+              {/* === 右侧轴高亮：多维流量读数 === */}
+              <ReferenceLine yAxisId="gex" y={metrics.momentum} stroke="transparent">
+                <Label content={<AxisHighlight value={metrics.momentum} color="#facc15" labelPrefix="MOM" />} position="right" />
+              </ReferenceLine>
+
+              <ReferenceLine yAxisId="gex" y={metrics.tide} stroke="transparent" offset={25}>
+                <Label content={<AxisHighlight value={metrics.tide} color="#f59e0b" labelPrefix="TIDE" />} position="right" />
+              </ReferenceLine>
+
+              <ReferenceLine yAxisId="gex" y={metrics.gex} stroke="transparent" offset={50}>
+                <Label 
+                  content={<AxisHighlight value={metrics.gex} color={metrics.gex >= 0 ? '#3b82f6' : '#f43f5e'} labelPrefix="GEX" />} 
+                  position="right" 
+                />
+              </ReferenceLine>
+
+              {/* 关键支柱标签 (价格锚点) */}
+              {rawPillars.map((p, idx) => (
+                <ReferenceLine key={idx} yAxisId="price" y={p.price} stroke="transparent">
+                  <Label content={<CustomPillarLabel text={p.text} color={p.color} textColor={p.textColor} price={p.price} />} />
+                </ReferenceLine>
+              ))}
+
+              {/* 价格主曲线：带光晕效果 */}
+              <Area 
+                yAxisId="price" 
+                type="monotone" 
+                dataKey="price" 
+                stroke="#10b981" 
+                strokeWidth={3} 
+                fill="url(#priceGradient)" 
+                isAnimationActive={false} 
+              />
+              
+              {/* 0DTE Gamma 柱状图 (对冲背景色) */}
+              <Bar yAxisId="gex" dataKey="gamma_per_one_percent_move_vol" barSize={4}>
+                {data.map((entry, index) => (
+                  <Cell 
+                    key={index} 
+                    fill={entry.gamma_per_one_percent_move_vol >= 0 ? '#3b82f6' : '#f43f5e'} 
+                    fillOpacity={0.15} 
+                  />
+                ))}
+              </Bar>
+
+              <Line yAxisId="gex" type="monotone" dataKey="gex_vol_change_rate" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Line yAxisId="gex" type="monotone" dataKey="net_tide" stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+              <Line yAxisId="gex" type="monotone" dataKey="gamma_1dte_vol" stroke="#818cf8" strokeWidth={2} dot={false} isAnimationActive={false} />
+
+              <defs>
+                <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* 右侧：机构节点快速预览 (OI & DP) */}
+        <div className="absolute right-0 top-1/2 -translate-y-1/2 flex flex-col gap-1 pointer-events-none opacity-20">
+           {topOiStrikes.slice(0, 2).map((s, i) => (
+             <div key={i} className="bg-blue-900/20 border border-blue-500/30 px-1 py-0.5 rounded text-[7px] font-black text-blue-400">
+               OI:{s.price}
+             </div>
+           ))}
+           {topDarkPoolStrikes.slice(0, 1).map((s, i) => (
+             <div key={i} className="bg-amber-900/20 border border-amber-500/30 px-1 py-0.5 rounded text-[7px] font-black text-amber-400">
+               DP:{s.price}
+             </div>
+           ))}
+        </div>
+      </div>
+
+      {/* 底部图例与状态 */}
+      <div className="mt-4 grid grid-cols-2 gap-4 border-t border-zinc-900 pt-4">
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-1 bg-emerald-500 rounded-full"></div>
+            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">SPX PRICE</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-1 bg-blue-500/40 rounded-full"></div>
+            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">0DTE GEX</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-1 bg-indigo-400 rounded-full"></div>
+            <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">OI READS</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-1 bg-amber-500 stroke-dasharray-3 rounded-full"></div>
+            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">MARKET TIDE</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-1 bg-yellow-400 rounded-full"></div>
+            <span className="text-[8px] font-black text-yellow-400 uppercase tracking-widest">MOMENTUM</span>
+          </div>
+        </div>
+        <div className="text-[8px] text-zinc-700 font-black uppercase tracking-widest italic text-right flex items-center justify-end">
+          Engine: Recharts v2.17 | <span className="text-yellow-500">Gold Star: Absolute GEX Max</span>
         </div>
       </div>
     </div>

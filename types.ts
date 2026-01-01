@@ -7,10 +7,15 @@ export interface GexDataPoint {
   gamma_1dte_vol?: number;
   gamma_1dte_oi?: number;
   net_tide?: number;
-  gex_vol_change_rate?: number;
+  gex_vol_change_rate?: number; // Current Momentum
+  gex_velocity?: number;        // Rate of change (1st derivative)
+  gex_acceleration?: number;    // Change in rate (2nd derivative)
+  flow_intensity?: number;      // Combined OFI (Order Flow Imbalance) score
   gex_1dte_wall?: number;
   gex_1dte_block?: number;
   gex_1dte_drive?: number;
+  net_call_premium?: number;
+  net_put_premium?: number;
 }
 
 export interface MarketTidePoint {
@@ -18,6 +23,8 @@ export interface MarketTidePoint {
   net_call_premium: number;
   net_put_premium: number;
   net_volume: number;
+  call_premium_change_rate?: number; 
+  put_premium_change_rate?: number;  
 }
 
 export interface PriceLevelVolume {
@@ -26,6 +33,17 @@ export interface PriceLevelVolume {
   put_volume: number;
   total_volume: number;
   net_gex: number;
+  call_premium?: number;
+  put_premium?: number;
+  open_interest?: number;
+  dark_pool_volume?: number;
+}
+
+export interface TopStrike {
+  price: number;
+  value: number;
+  type: 'OI' | 'DARK_POOL';
+  side?: 'Call' | 'Put' | 'Total';
 }
 
 export interface AnalysisPacket {
@@ -36,6 +54,9 @@ export interface AnalysisPacket {
   current_gex_vol: number;
   current_gex_oi: number;
   gex_vol_change_rate: number;
+  gex_velocity: number;
+  gex_acceleration: number;
+  flow_intensity: number;
 
   current_1dte_vol: number;
   current_1dte_oi: number;
@@ -51,6 +72,16 @@ export interface AnalysisPacket {
   
   market_tide?: MarketTidePoint;
   price_levels?: PriceLevelVolume[];
+
+  major_0dte_pos?: PriceLevelVolume;
+  major_0dte_neg?: PriceLevelVolume;
+  major_1dte_pos?: PriceLevelVolume;
+  major_1dte_neg?: PriceLevelVolume;
+  total_0dte_premium?: number;
+  total_1dte_premium?: number;
+
+  top_oi_strikes: TopStrike[];
+  top_dark_pool_strikes: TopStrike[];
 }
 
 export interface TradingAlert {
@@ -58,8 +89,8 @@ export interface TradingAlert {
   timestamp: string;
   price: number;
   strategy: 'LONG' | 'SHORT' | 'NEUTRAL';
-  pattern?: string; // Identified institutional pattern
-  recommendedStrategies?: string[]; // IDs like S1, S2 from StrategyLibrary
+  pattern?: string;
+  recommendedStrategies?: string[];
   regime: string;
   analysis: string;
   risk: string;

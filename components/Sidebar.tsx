@@ -34,7 +34,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
             }`}
           >
             <i className={`${item.icon} text-sm`}></i>
-            <span className="text-[7px] font-black uppercase tracking-tighter">{item.label}</span>
+            <span className="text-[8px] font-black uppercase tracking-tighter">{item.label}</span>
           </button>
         ))}
       </nav>
