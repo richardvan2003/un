@@ -1,4 +1,3 @@
-
 import { AnalysisPacket, GexDataPoint, PriceLevelVolume, MarketTidePoint, TopStrike } from '../types';
 
 interface UWSpotExposureResponsePoint {
@@ -20,21 +19,34 @@ const parseSafeNumber = (val: any, fallback: number = 0): number => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-// HMA helper for real data
-const calculateHMAForPoints = (prices: number[], n: number) => {
-  if (prices.length < n) return prices[prices.length - 1] || 0;
-  const calculateWMA = (vals: number[], period: number) => {
-    const window = vals.slice(-period);
-    let sum = 0, weightSum = 0;
-    for(let i=0; i<period; i++) {
-      sum += window[i] * (i + 1);
-      weightSum += (i + 1);
-    }
-    return sum / weightSum;
-  };
-  const wmaHalf = calculateWMA(prices, Math.floor(n/2));
-  const wmaFull = calculateWMA(prices, n);
-  return 2 * wmaHalf - wmaFull;
+// Robust HMA calculation for real-world data sequences
+const calculateWMAForPoints = (vals: number[], period: number) => {
+  if (vals.length === 0) return 0;
+  const p = Math.min(vals.length, period);
+  const window = vals.slice(-p);
+  let sum = 0, weightSum = 0;
+  for(let i=0; i<p; i++) {
+    sum += window[i] * (i + 1);
+    weightSum += (i + 1);
+  }
+  return sum / weightSum;
+};
+
+const calculateHMAForPoints = (series: number[], n: number) => {
+  if (series.length < n) return series[series.length - 1] || 0;
+  
+  const halfN = Math.floor(n / 2);
+  const sqrtN = Math.floor(Math.sqrt(n));
+  
+  const diffSeries: number[] = [];
+  for (let i = 0; i < sqrtN; i++) {
+    const subSeries = series.slice(0, series.length - i);
+    const wmaHalf = calculateWMAForPoints(subSeries, halfN);
+    const wmaFull = calculateWMAForPoints(subSeries, n);
+    diffSeries.unshift(2 * wmaHalf - wmaFull);
+  }
+  
+  return calculateWMAForPoints(diffSeries, sqrtN);
 };
 
 export class APIError extends Error {
@@ -80,25 +92,53 @@ export const fetchUWMarketData = async (ticker: string, apiKey: string): Promise
     const prices = sorted.map((p: any) => parseSafeNumber(p.price));
     
     const latest = sorted[sorted.length - 1];
-    const prev = sorted[sorted.length - 2] || latest;
     
     const currentPrice = parseSafeNumber(latest.price);
     const currentGex = parseSafeNumber(latest.exposure);
-    const prevGex = parseSafeNumber(prev.exposure);
-
+    
     // 1. HMA Momentum Logic (period 10)
     const hmaCurr = calculateHMAForPoints(prices, 10);
     const hmaPrev = calculateHMAForPoints(prices.slice(0, -1), 10);
     const priceVelocity = (hmaCurr - hmaPrev) / (hmaPrev || 1);
     
-    // 2. Sensitive Momentum calculation: priceVelocity * logVolume * gexBias
+    // 2. Sensitive Momentum (GEX Vol Change Rate)
     const volumeFactor = Math.log(parseSafeNumber(latest.volume || 1e5));
-    const zero_gamma_guess = currentPrice - 5; // Simplified
+    const zero_gamma_guess = currentPrice - 5;
     const gexBias = (currentPrice > zero_gamma_guess && currentGex > 0) ? 1.2 : 0.8;
     const gex_vol_change_rate = priceVelocity * volumeFactor * gexBias * 1000000;
 
-    const gex_velocity = gex_vol_change_rate - (prevGex - parseSafeNumber(sorted[sorted.length-3]?.exposure));
-    const gex_acceleration = gex_velocity - (parseSafeNumber(prev.exposure_velocity || 0));
+    // 3. Current Velocity History Construction
+    // Optimized velocity derivation for the last hour
+    const deriveVelocityAt = (idx: number) => {
+      if (idx < 1) return 0;
+      const curr = sorted[idx];
+      const pHistory = sorted.slice(0, idx + 1).map((p: any) => parseSafeNumber(p.price));
+      const hc = calculateHMAForPoints(pHistory, 10);
+      const hp = calculateHMAForPoints(pHistory.slice(0, -1), 10);
+      const pv = (hc - hp) / (hp || 1);
+      const vf = Math.log(parseSafeNumber(curr.volume || 1e5));
+      const curGex = parseSafeNumber(curr.exposure);
+      const curP = parseSafeNumber(curr.price);
+      const gb = (curP > curP - 5 && curGex > 0) ? 1.2 : 0.8;
+      return pv * vf * gb * 1000000;
+    };
+
+    // 4. GEX Acceleration (Force): 1-Hour HMA-Smoothed Velocity Sequence
+    // Interval is usually 1 min, so 60 points = 60 mins.
+    const hourWindow = 60;
+    const velocitySeries: number[] = [];
+    
+    // Collect a sliding window of velocities
+    const historyStart = Math.max(0, sorted.length - (hourWindow + 20));
+    for (let i = historyStart; i < sorted.length; i++) {
+      if (i === sorted.length - 1) {
+        velocitySeries.push(gex_vol_change_rate);
+      } else {
+        velocitySeries.push(deriveVelocityAt(i));
+      }
+    }
+    
+    const gex_acceleration = calculateHMAForPoints(velocitySeries, hourWindow);
 
     const levels: PriceLevelVolume[] = (levelsJson.data || []).map((item: any) => {
       const cv = parseSafeNumber(item.call_volume);
@@ -118,7 +158,9 @@ export const fetchUWMarketData = async (ticker: string, apiKey: string): Promise
     const tideLatest = tideData[tideData.length - 1] || null;
     const netPrem = parseSafeNumber(tideLatest?.net_call_premium) - parseSafeNumber(tideLatest?.net_put_premium);
     
-    // 3. OFI Intensity
+    // 5. OFI Intensity
+    const prev_gex_vol_change_rate = velocitySeries.length >= 2 ? velocitySeries[velocitySeries.length - 2] : 0;
+    const gex_velocity = gex_vol_change_rate - prev_gex_vol_change_rate;
     const flow_intensity = Math.min(100, Math.max(0, 50 + (netPrem / 5000000) * 10 + (gex_velocity / 1000000) * 15));
 
     const sortedByGex = [...levels].sort((a, b) => b.net_gex - a.net_gex);

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { AppTab } from '../types';
 
@@ -18,8 +17,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
 
   return (
     <div className="w-16 md:w-20 bg-zinc-950 border-r border-zinc-900 flex flex-col items-center py-6 gap-8 z-50">
-      <div className="w-10 h-10 bg-[rgb(var(--accent-rgb))] rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(var(--accent-rgb),0.3)] mb-4 cursor-pointer transition-all" onClick={() => setActiveTab('dashboard')}>
-        <i className="fa-solid fa-shuttle-space text-black text-lg"></i>
+      <div className="w-11 h-11 bg-[rgb(var(--accent-rgb))] rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(var(--accent-rgb),0.3)] mb-4 cursor-pointer transition-all" onClick={() => setActiveTab('dashboard')}>
+        <i className="fa-solid fa-shuttle-space text-black text-xl"></i>
       </div>
       
       <nav className="flex flex-col gap-4 flex-1">
@@ -27,21 +26,21 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
           <button
             key={item.id}
             onClick={() => setActiveTab(item.id)}
-            className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-1 transition-all group ${
+            className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center gap-1 transition-all group ${
               activeTab === item.id 
               ? 'bg-[rgba(var(--accent-rgb),0.1)] accent-text border border-[rgba(var(--accent-rgb),0.2)]' 
               : 'text-zinc-600 hover:text-zinc-300 hover:bg-zinc-900'
             }`}
           >
-            <i className={`${item.icon} text-sm`}></i>
-            <span className="text-[8px] font-black uppercase tracking-tighter">{item.label}</span>
+            <i className={`${item.icon} text-base`}></i>
+            <span className="text-[9px] font-black uppercase tracking-tighter">{item.label}</span>
           </button>
         ))}
       </nav>
 
       <div className="flex flex-col gap-4 text-zinc-700">
-        <button onClick={() => setActiveTab('settings')} className={`transition-colors ${activeTab === 'settings' ? 'accent-text' : 'hover:text-zinc-400'}`}><i className="fa-solid fa-gear"></i></button>
-        <button className="hover:text-zinc-400 transition-colors"><i className="fa-solid fa-circle-user"></i></button>
+        <button onClick={() => setActiveTab('settings')} className={`transition-colors ${activeTab === 'settings' ? 'accent-text' : 'hover:text-zinc-400'}`}><i className="fa-solid fa-gear text-lg"></i></button>
+        <button className="hover:text-zinc-400 transition-colors"><i className="fa-solid fa-circle-user text-lg"></i></button>
       </div>
     </div>
   );

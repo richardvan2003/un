@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, 
@@ -19,10 +18,10 @@ interface GexChartProps {
 
 const formatValue = (val: number) => {
   const absVal = Math.abs(val);
-  if (absVal >= 1e9) return `${(val / 1e9).toFixed(1)}B`;
-  if (absVal >= 1e6) return `${(val / 1e6).toFixed(1)}M`;
-  if (absVal >= 1e3) return `${(val / 1e3).toFixed(0)}K`;
-  return val.toFixed(0);
+  if (absVal >= 1e9) return `${Math.round(val / 1e9)}B`;
+  if (absVal >= 1e6) return `${Math.round(val / 1e6)}M`;
+  if (absVal >= 1e3) return `${Math.round(val / 1e3)}K`;
+  return Math.round(val).toString();
 };
 
 // 支柱标签渲染组件
@@ -36,7 +35,7 @@ const CustomPillarLabel = (props: any) => {
     <g transform={`translate(${viewBox.width - width - 5}, ${finalY})`}>
       <rect width={width} height={height} rx="4" fill={color} className="filter drop-shadow-md" />
       <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill={textColor} fontSize="9" fontWeight="900" className="font-mono uppercase tracking-tighter">
-        {text}: {price}
+        {text}: {Math.round(price)}
       </text>
     </g>
   );
@@ -50,7 +49,7 @@ const AxisHighlight = (props: any) => {
   const labelX = side === 'right' ? x + width + 5 : x - labelWidth - 5;
   const rectWidth = labelWidth;
   const textColor = color === '#000' || color === '#facc15' || color === '#f59e0b' ? '#000' : '#fff';
-  const displayValue = isPrice ? `$${value.toFixed(1)}` : formatValue(value);
+  const displayValue = isPrice ? `$${Math.round(value)}` : formatValue(value);
 
   return (
     <g transform={`translate(${labelX}, ${y - 10})`}>
@@ -72,37 +71,53 @@ const AxisHighlight = (props: any) => {
 
 // 专业级 Tooltip
 const CustomTooltip = (props: any) => {
-  const { active, payload, label } = props;
+  const { active, payload, label, top5GexStrikes } = props;
   if (active && payload && payload.length) {
     const d = payload.find((p: any) => p.dataKey === 'price')?.payload || payload[0].payload;
     const isPos = d.gamma_per_one_percent_move_vol >= 0;
 
     return (
-      <div className="bg-zinc-950/95 border border-zinc-800 p-4 rounded-xl shadow-2xl backdrop-blur-xl min-w-[260px] font-mono ring-1 ring-white/5">
+      <div className="bg-zinc-950/95 border border-zinc-800 p-4 rounded-xl shadow-2xl backdrop-blur-xl min-w-[280px] font-mono ring-1 ring-white/5">
         <div className="flex justify-between items-center mb-3 border-b border-zinc-800 pb-2">
            <span className="text-[10px] font-black text-zinc-500 uppercase">{new Date(label).toLocaleTimeString()}</span>
            <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${isPos ? 'bg-blue-500/10 text-blue-400' : 'bg-rose-500/10 text-rose-400'}`}>
              {isPos ? 'GLUE 模式' : 'FUEL 模式'}
            </span>
         </div>
-        <div className="space-y-1.5">
-          <div className="flex justify-between"><span className="text-[9px] text-zinc-500 font-bold uppercase">标的价格</span><span className="text-sm font-black text-white">${d.price.toFixed(2)}</span></div>
+        
+        <div className="space-y-1.5 mb-4">
+          <div className="flex justify-between"><span className="text-[9px] text-zinc-500 font-bold uppercase">标的价格</span><span className="text-sm font-black text-white">${Math.round(d.price)}</span></div>
           <div className="flex justify-between"><span className="text-[9px] text-zinc-500 font-bold uppercase">0DTE GEX</span><span className={`text-[11px] font-black ${isPos ? 'text-blue-400' : 'text-rose-400'}`}>{formatValue(d.gamma_per_one_percent_move_vol)}</span></div>
           
           <div className="pt-2 mt-2 border-t border-zinc-900 grid grid-cols-2 gap-x-4 gap-y-1">
             <span className="text-[8px] text-zinc-600 font-bold uppercase">1DTE GEX</span>
             <span className="text-[10px] font-bold text-indigo-400 text-right">{formatValue(d.gamma_1dte_vol || 0)}</span>
             
-            <span className="text-[8px] text-zinc-600 font-bold uppercase">Tide (潮汐)</span>
-            <span className="text-[10px] font-bold text-amber-500 text-right">{formatValue(d.net_tide || 0)}</span>
-            
             <span className="text-[8px] text-zinc-600 font-bold uppercase">Momentum</span>
             <span className="text-[10px] font-bold text-yellow-400 text-right">{formatValue(d.gex_vol_change_rate || 0)}</span>
-
-            <span className="text-[8px] text-zinc-600 font-bold uppercase">Velocity</span>
-            <span className="text-[10px] font-bold text-zinc-400 text-right">{formatValue(d.gex_velocity || 0)}</span>
           </div>
         </div>
+
+        {top5GexStrikes && top5GexStrikes.length > 0 && (
+          <div className="bg-zinc-900/50 p-2.5 rounded-lg border border-zinc-800/50">
+            <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest mb-2 border-b border-zinc-800/50 pb-1">
+              Top 5 GEX 敞口节点
+            </p>
+            <div className="space-y-1.5">
+              {top5GexStrikes.map((s: any, i: number) => (
+                <div key={i} className="flex justify-between items-center text-[10px]">
+                  <span className="text-zinc-500 font-bold flex items-center gap-1.5">
+                    <span className={`w-1 h-1 rounded-full ${s.net_gex >= 0 ? 'bg-blue-500' : 'bg-rose-500'}`}></span>
+                    ${s.price}
+                  </span>
+                  <span className={`font-black ${s.net_gex >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>
+                    {formatValue(s.net_gex)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -121,6 +136,13 @@ const GexChart: React.FC<GexChartProps> = ({
 }) => {
   const [showProfile, setShowProfile] = useState(true);
   
+  // 计算 Top 5 绝对 GEX 节点
+  const top5GexStrikes = useMemo(() => {
+    return [...priceLevels]
+      .sort((a, b) => Math.abs(b.net_gex) - Math.abs(a.net_gex))
+      .slice(0, 5);
+  }, [priceLevels]);
+
   // 核心支柱配置
   const rawPillars = useMemo(() => {
     const p = [];
@@ -153,8 +175,8 @@ const GexChart: React.FC<GexChartProps> = ({
     return { domainMin: Math.floor(minP - pad), domainMax: Math.ceil(maxP + pad) };
   }, [data, rawPillars]);
 
-  // 计算 Y 轴 Gamma 剖面分布 (Profile) - 仅显示 Top 6 读数，并标注 Top 1
-  const { strikeProfile, top1Strike } = useMemo(() => {
+  // 计算 Y 轴 Gamma 剖面分布 (Profile)
+  const strikeProfile = useMemo(() => {
     const sorted = [...priceLevels].sort((a, b) => Math.abs(b.net_gex) - Math.abs(a.net_gex));
     const top6 = sorted.slice(0, 6)
       .map(l => ({
@@ -167,7 +189,7 @@ const GexChart: React.FC<GexChartProps> = ({
       .filter(l => l.strike >= domainMin && l.strike <= domainMax)
       .sort((a, b) => a.strike - b.strike);
 
-    return { strikeProfile: top6, top1Strike: sorted.length > 0 ? sorted[0].price : null };
+    return top6;
   }, [priceLevels, domainMin, domainMax, kingStrike, zeroGamma]);
 
   const maxAbsGexScale = useMemo(() => {
@@ -187,10 +209,10 @@ const GexChart: React.FC<GexChartProps> = ({
         <div>
           <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 
-            对冲结构分析矩阵 (Gamma Matrix v3.0)
+            对冲结构分析矩阵 (Gamma Matrix v3.1)
           </h3>
           <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1 tracking-widest">
-            Top 1 Node Highlighting & Coordinate Precision Alignment
+            Top 5 Abs GEX Strike Highlighting Enabled
           </p>
         </div>
         <div className="flex gap-2">
@@ -204,7 +226,7 @@ const GexChart: React.FC<GexChartProps> = ({
       </div>
 
       <div className="flex-1 flex gap-4 relative">
-        {/* 左侧：Strike Profile (仅 Top 6 GEX 读数，高亮 Top 1) */}
+        {/* 左侧：Strike Profile */}
         {showProfile && (
           <div className="w-24 h-full border-r border-zinc-900 pr-2">
             <ResponsiveContainer width="100%" height="100%">
@@ -224,9 +246,6 @@ const GexChart: React.FC<GexChartProps> = ({
                 </Bar>
               </ComposedChart>
             </ResponsiveContainer>
-            <div className="absolute top-0 left-0 text-[7px] font-black text-zinc-700 uppercase vertical-text">
-               Top 6 Nodes | <span className="text-yellow-500">Gold: Top 1 GEX</span>
-            </div>
           </div>
         )}
 
@@ -245,7 +264,7 @@ const GexChart: React.FC<GexChartProps> = ({
                 orientation="left" 
                 domain={[domainMin, domainMax]} 
                 stroke="#71717a" fontSize={10} axisLine={false} fontWeight="900"
-                tickFormatter={(v) => `$${v}`}
+                tickFormatter={(v) => `$${Math.round(v)}`}
               />
               <YAxis 
                 yAxisId="gex" 
@@ -255,7 +274,37 @@ const GexChart: React.FC<GexChartProps> = ({
                 tickFormatter={(v) => formatValue(v)}
               />
               
-              <Tooltip content={<CustomTooltip />} isAnimationActive={false} cursor={{ stroke: '#27272a', strokeWidth: 1 }} />
+              <Tooltip 
+                content={<CustomTooltip top5GexStrikes={top5GexStrikes} />} 
+                isAnimationActive={false} 
+                cursor={{ stroke: '#27272a', strokeWidth: 1 }} 
+              />
+
+              {/* === 左侧轴高亮：Top 5 GEX Strikes (指示灯) === */}
+              {top5GexStrikes.map((s, idx) => (
+                <ReferenceLine 
+                  key={`top5-${idx}`}
+                  yAxisId="price" 
+                  y={s.price} 
+                  stroke={s.net_gex >= 0 ? '#3b82f6' : '#f43f5e'} 
+                  strokeWidth={2} 
+                  strokeOpacity={0.6}
+                  strokeDasharray="1 5"
+                >
+                  <Label 
+                    content={
+                      <AxisHighlight 
+                        value={s.net_gex} 
+                        color={s.net_gex >= 0 ? '#3b82f6' : '#f43f5e'} 
+                        labelPrefix={`NODE-${idx+1}`} 
+                        side="left" 
+                        labelWidth={75} 
+                      />
+                    } 
+                    position="left" 
+                  />
+                </ReferenceLine>
+              ))}
 
               {/* === 左侧轴高亮：实时价格 === */}
               <ReferenceLine 
@@ -272,35 +321,9 @@ const GexChart: React.FC<GexChartProps> = ({
                 />
               </ReferenceLine>
 
-              {/* === 左侧轴高亮：Top 2 OI 读数 === */}
-              {topOiStrikes.slice(0, 2).map((oi, idx) => (
-                <ReferenceLine 
-                  key={`oi-${idx}`}
-                  yAxisId="price" 
-                  y={oi.price} 
-                  stroke="transparent"
-                >
-                  <Label 
-                    content={<AxisHighlight value={oi.value} color="#818cf8" labelPrefix={`OI-${idx+1}`} side="left" labelWidth={70} />} 
-                    position="left" 
-                  />
-                </ReferenceLine>
-              ))}
-
               {/* === 右侧轴高亮：多维流量读数 === */}
               <ReferenceLine yAxisId="gex" y={metrics.momentum} stroke="transparent">
                 <Label content={<AxisHighlight value={metrics.momentum} color="#facc15" labelPrefix="MOM" />} position="right" />
-              </ReferenceLine>
-
-              <ReferenceLine yAxisId="gex" y={metrics.tide} stroke="transparent" offset={25}>
-                <Label content={<AxisHighlight value={metrics.tide} color="#f59e0b" labelPrefix="TIDE" />} position="right" />
-              </ReferenceLine>
-
-              <ReferenceLine yAxisId="gex" y={metrics.gex} stroke="transparent" offset={50}>
-                <Label 
-                  content={<AxisHighlight value={metrics.gex} color={metrics.gex >= 0 ? '#3b82f6' : '#f43f5e'} labelPrefix="GEX" />} 
-                  position="right" 
-                />
               </ReferenceLine>
 
               {/* 关键支柱标签 (价格锚点) */}
@@ -310,7 +333,7 @@ const GexChart: React.FC<GexChartProps> = ({
                 </ReferenceLine>
               ))}
 
-              {/* 价格主曲线：带光晕效果 */}
+              {/* 价格主曲线 */}
               <Area 
                 yAxisId="price" 
                 type="monotone" 
@@ -321,7 +344,7 @@ const GexChart: React.FC<GexChartProps> = ({
                 isAnimationActive={false} 
               />
               
-              {/* 0DTE Gamma 柱状图 (对冲背景色) */}
+              {/* 0DTE Gamma 柱状图 */}
               <Bar yAxisId="gex" dataKey="gamma_per_one_percent_move_vol" barSize={4}>
                 {data.map((entry, index) => (
                   <Cell 
@@ -333,8 +356,6 @@ const GexChart: React.FC<GexChartProps> = ({
               </Bar>
 
               <Line yAxisId="gex" type="monotone" dataKey="gex_vol_change_rate" stroke="#facc15" strokeWidth={2} dot={false} isAnimationActive={false} />
-              <Line yAxisId="gex" type="monotone" dataKey="net_tide" stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
-              <Line yAxisId="gex" type="monotone" dataKey="gamma_1dte_vol" stroke="#818cf8" strokeWidth={2} dot={false} isAnimationActive={false} />
 
               <defs>
                 <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
@@ -345,48 +366,25 @@ const GexChart: React.FC<GexChartProps> = ({
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-
-        {/* 右侧：机构节点快速预览 (OI & DP) */}
-        <div className="absolute right-0 top-1/2 -translate-y-1/2 flex flex-col gap-1 pointer-events-none opacity-20">
-           {topOiStrikes.slice(0, 2).map((s, i) => (
-             <div key={i} className="bg-blue-900/20 border border-blue-500/30 px-1 py-0.5 rounded text-[7px] font-black text-blue-400">
-               OI:{s.price}
-             </div>
-           ))}
-           {topDarkPoolStrikes.slice(0, 1).map((s, i) => (
-             <div key={i} className="bg-amber-900/20 border border-amber-500/30 px-1 py-0.5 rounded text-[7px] font-black text-amber-400">
-               DP:{s.price}
-             </div>
-           ))}
-        </div>
       </div>
 
-      {/* 底部图例与状态 */}
-      <div className="mt-4 grid grid-cols-2 gap-4 border-t border-zinc-900 pt-4">
-        <div className="flex flex-wrap gap-x-6 gap-y-2">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-1 bg-emerald-500 rounded-full"></div>
-            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">SPX PRICE</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-1 bg-blue-500/40 rounded-full"></div>
-            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">0DTE GEX</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-1 bg-indigo-400 rounded-full"></div>
-            <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">OI READS</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-1 bg-amber-500 stroke-dasharray-3 rounded-full"></div>
-            <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">MARKET TIDE</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-1 bg-yellow-400 rounded-full"></div>
-            <span className="text-[8px] font-black text-yellow-400 uppercase tracking-widest">MOMENTUM</span>
-          </div>
+      {/* 底部图例 */}
+      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-zinc-900 pt-4">
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-1 bg-emerald-500 rounded-full"></div>
+          <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">SPX PRICE</span>
         </div>
-        <div className="text-[8px] text-zinc-700 font-black uppercase tracking-widest italic text-right flex items-center justify-end">
-          Engine: Recharts v2.17 | <span className="text-yellow-500">Gold Star: Absolute GEX Max</span>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-1 bg-blue-500 rounded-full"></div>
+          <span className="text-[8px] font-black text-blue-400 uppercase tracking-widest">POS GEX NODE</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-1 bg-rose-500 rounded-full"></div>
+          <span className="text-[8px] font-black text-rose-400 uppercase tracking-widest">NEG GEX NODE</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-1 bg-yellow-400 rounded-full"></div>
+          <span className="text-[8px] font-black text-yellow-400 uppercase tracking-widest">MOMENTUM</span>
         </div>
       </div>
     </div>

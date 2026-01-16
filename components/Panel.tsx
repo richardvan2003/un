@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface PanelProps {
@@ -16,10 +15,10 @@ const Panel: React.FC<PanelProps> = ({ title, subtitle, icon, children, footer, 
       {title && (
         <div className="p-4 border-b border-zinc-900 flex items-center justify-between bg-zinc-900/10">
           <div className="flex items-center gap-3">
-            {icon && <i className={`${icon} text-zinc-500 text-xs`}></i>}
+            {icon && <i className={`${icon} text-zinc-500 text-sm`}></i>}
             <div>
-              <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 leading-none">{title}</h3>
-              {subtitle && <p className="text-[8px] text-zinc-600 font-bold uppercase mt-1 tracking-wider">{subtitle}</p>}
+              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400 leading-none">{title}</h3>
+              {subtitle && <p className="text-[9px] text-zinc-600 font-bold uppercase mt-1 tracking-wider">{subtitle}</p>}
             </div>
           </div>
           <div className="flex gap-1">
