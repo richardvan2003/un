@@ -50,6 +50,8 @@ export interface AnalysisPacket {
   ticker: string;
   timestamp: string;
   current_price: number;
+  vix: number;
+  implied_move?: number; // Calculated from ATM Straddle
   
   current_gex_vol: number;
   current_gex_oi: number;
@@ -99,7 +101,7 @@ export interface TradingAlert {
   pushedToDiscord?: boolean;
 }
 
-export type AppTab = 'dashboard' | 'strategy' | 'audit' | 'terminal' | 'settings';
+export type AppTab = 'dashboard' | 'strategy' | 'audit' | 'terminal' | 'settings' | 'statistics';
 export type AppTheme = 'emerald' | 'ocean' | 'obsidian' | 'crimson';
 export type AppFontSize = 'xs' | 'sm' | 'base' | 'lg';
 

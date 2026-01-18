@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AppTab } from '../types';
 
@@ -13,6 +14,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
     { id: 'audit', icon: 'fa-solid fa-database', label: '数据审计' },
     { id: 'terminal', icon: 'fa-solid fa-terminal', label: '命令终端' },
     { id: 'settings', icon: 'fa-solid fa-sliders', label: '个性化' },
+    { id: 'statistics', icon: 'fa-solid fa-chart-pie', label: '策略统计' },
   ];
 
   return (
@@ -33,7 +35,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
             }`}
           >
             <i className={`${item.icon} text-base`}></i>
-            <span className="text-[9px] font-black uppercase tracking-tighter">{item.label}</span>
+            <span className="text-[9px] font-black uppercase tracking-tighter text-center px-1">{item.label}</span>
           </button>
         ))}
       </nav>

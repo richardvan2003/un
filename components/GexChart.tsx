@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { GexDataPoint, PriceLevelVolume, TopStrike } from '../types';
 
+// Define the GexChartProps interface
 interface GexChartProps {
   data: GexDataPoint[];
   priceLevels?: PriceLevelVolume[];
@@ -28,13 +29,13 @@ const formatValue = (val: number) => {
 const CustomPillarLabel = (props: any) => {
   const { y, viewBox, text, color, textColor, price, offset = 0 } = props;
   const width = 120;
-  const height = 20;
+  const height = 18;
   const finalY = y + offset - height / 2;
 
   return (
     <g transform={`translate(${viewBox.width - width - 5}, ${finalY})`}>
       <rect width={width} height={height} rx="4" fill={color} className="filter drop-shadow-md" />
-      <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill={textColor} fontSize="9" fontWeight="900" className="font-mono uppercase tracking-tighter">
+      <text x={width / 2} y={height / 2 + 4} textAnchor="middle" fill={textColor} fontSize="8" fontWeight="900" className="font-mono uppercase tracking-tighter">
         {text}: {Math.round(price)}
       </text>
     </g>
@@ -43,27 +44,28 @@ const CustomPillarLabel = (props: any) => {
 
 // 通用坐标轴高亮标签组件 (Callout)
 const AxisHighlight = (props: any) => {
-  const { viewBox, value, color, labelPrefix, side = 'right', isPrice = false, labelWidth = 75 } = props;
+  const { viewBox, value, color, labelPrefix, side = 'right', isPrice = false, labelWidth = 105 } = props;
   const { x, y, width } = viewBox;
   
   const labelX = side === 'right' ? x + width + 5 : x - labelWidth - 5;
+  const rectHeight = 16;
   const rectWidth = labelWidth;
   const textColor = color === '#000' || color === '#facc15' || color === '#f59e0b' ? '#000' : '#fff';
   const displayValue = isPrice ? `$${Math.round(value)}` : formatValue(value);
 
   return (
-    <g transform={`translate(${labelX}, ${y - 10})`}>
-      <rect width={rectWidth} height={20} rx="4" fill={color} className="filter drop-shadow-lg shadow-black" />
+    <g transform={`translate(${labelX}, ${y - rectHeight / 2})`}>
+      <rect width={rectWidth} height={rectHeight} rx="2" fill={color} className="filter drop-shadow-lg shadow-black" />
       <text 
-        x={rectWidth / 2} 
-        y="14" 
-        textAnchor="middle" 
+        x={rectWidth - 4} 
+        y="11" 
+        textAnchor="end" 
         fill={textColor} 
-        fontSize="9" 
+        fontSize="7" 
         fontWeight="900" 
         className="font-mono tracking-tighter"
       >
-        {labelPrefix}: {displayValue}
+        {labelPrefix}:{displayValue}
       </text>
     </g>
   );
@@ -252,7 +254,7 @@ const GexChart: React.FC<GexChartProps> = ({
         {/* 主视窗：Time-Series Analysis */}
         <div className="flex-1">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={data} margin={{ top: 10, right: 85, left: 20, bottom: 0 }}>
+            <ComposedChart data={data} margin={{ top: 10, right: 110, left: 20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
               <XAxis 
                 dataKey="time" 
@@ -296,9 +298,9 @@ const GexChart: React.FC<GexChartProps> = ({
                       <AxisHighlight 
                         value={s.net_gex} 
                         color={s.net_gex >= 0 ? '#3b82f6' : '#f43f5e'} 
-                        labelPrefix={`NODE-${idx+1}`} 
+                        labelPrefix={`N${idx+1}-${Math.round(s.price)}`} 
                         side="left" 
-                        labelWidth={75} 
+                        labelWidth={105} 
                       />
                     } 
                     position="left" 
@@ -316,14 +318,14 @@ const GexChart: React.FC<GexChartProps> = ({
                 strokeOpacity={0.4}
               >
                 <Label 
-                  content={<AxisHighlight value={metrics.price} color="#10b981" labelPrefix="PRICE" side="left" isPrice={true} labelWidth={75} />} 
+                  content={<AxisHighlight value={metrics.price} color="#10b981" labelPrefix="PRICE" side="left" isPrice={true} labelWidth={105} />} 
                   position="left" 
                 />
               </ReferenceLine>
 
               {/* === 右侧轴高亮：多维流量读数 === */}
               <ReferenceLine yAxisId="gex" y={metrics.momentum} stroke="transparent">
-                <Label content={<AxisHighlight value={metrics.momentum} color="#facc15" labelPrefix="MOM" />} position="right" />
+                <Label content={<AxisHighlight value={metrics.momentum} color="#facc15" labelPrefix="MOM" labelWidth={75} />} position="right" />
               </ReferenceLine>
 
               {/* 关键支柱标签 (价格锚点) */}

@@ -1,10 +1,10 @@
+
 import { GexDataPoint, AnalysisPacket, MarketTidePoint, PriceLevelVolume, TopStrike } from '../types';
 
 let currentPrice = 5240;
 let history: GexDataPoint[] = [];
 
 // Hull Moving Average (HMA) Implementation
-// HMA = WMA(2*WMA(n/2) - WMA(n), sqrt(n))
 const calculateWMA = (series: number[], n: number) => {
   if (series.length === 0) return 0;
   const period = Math.min(series.length, n);
@@ -21,11 +21,8 @@ const calculateWMA = (series: number[], n: number) => {
 
 const calculateHMA = (series: number[], n: number) => {
   if (series.length < n) return series[series.length - 1] || 0;
-  
   const halfN = Math.floor(n / 2);
   const sqrtN = Math.floor(Math.sqrt(n));
-  
-  // Generate a small series of (2*WMA(n/2) - WMA(n)) to apply the final sqrt(n) WMA smoothing
   const diffSeries: number[] = [];
   for (let i = 0; i < sqrtN; i++) {
     const subSeries = series.slice(0, series.length - i);
@@ -33,7 +30,6 @@ const calculateHMA = (series: number[], n: number) => {
     const wmaFull = calculateWMA(subSeries, n);
     diffSeries.unshift(2 * wmaHalf - wmaFull);
   }
-  
   return calculateWMA(diffSeries, sqrtN);
 };
 
@@ -87,41 +83,25 @@ export const getLatestMarketData = (): AnalysisPacket => {
   const newCallPrem = (lastPoint.net_call_premium || 0) + sentimentBias + (Math.random() - 0.5) * 1000000;
   const newPutPrem = (lastPoint.net_put_premium || 0) - sentimentBias + (Math.random() - 0.5) * 1000000;
 
-  // 1. Ultra-Sensitive Momentum (HMA based)
   const hmaCurr = calculateHMA(pricesHistory, 10);
   const hmaPrev = calculateHMA(pricesHistory.slice(0, -1), 10);
   const priceVelocity = (hmaCurr - hmaPrev) / (hmaPrev || 1);
-  
-  // 2. GEX Bias Factor
   const zero_gamma_val = Math.round(currentPrice + (newGexVol > 0 ? -10 : 10));
   const gexBias = (currentPrice > zero_gamma_val && newGexVol > 0) ? 1.2 : 0.8;
-  
-  // 3. Simulated Volume Log Scale
   const simulatedVolume = Math.exp(Math.random() * 5 + 10); 
   const volumeFactor = Math.log(simulatedVolume);
-  
-  // 4. Combined Sensitive Momentum (GEX Vol Change Rate - MOM)
   const gex_vol_change_rate = priceVelocity * gexBias * volumeFactor * 10000000;
-
-  // 5. GEX Velocity (Change in Momentum)
-  const prev_change_rate = lastPoint.gex_vol_change_rate || 0;
-  const gex_velocity = gex_vol_change_rate - prev_change_rate;
-
-  // 6. REFINED GEX FORCE (Acceleration): 1-Hour HMA-Smoothed Velocity
-  // Mock interval is 3 mins, so 20 points = 60 mins.
+  const gex_velocity = gex_vol_change_rate - (lastPoint.gex_vol_change_rate || 0);
   const hourWindow = 20; 
   const historicalVelocities = history.slice(-(hourWindow + 10)).map(h => h.gex_velocity || 0);
   historicalVelocities.push(gex_velocity);
-  
   const gex_acceleration = calculateHMA(historicalVelocities, hourWindow);
   
-  // 7. Order Flow Imbalance (OFI)
   const callDelta = newCallPrem - (lastPoint.net_call_premium || 0);
   const putDelta = newPutPrem - (lastPoint.net_put_premium || 0);
   const ofi = (callDelta - putDelta) / (Math.abs(callDelta) + Math.abs(putDelta) || 1);
   const flow_intensity = Math.min(100, Math.max(0, 50 + ofi * 50));
 
-  // 8. Price Levels and Institutional Data
   const price_levels: PriceLevelVolume[] = [];
   const basePrice = Math.round(currentPrice / 5) * 5;
   for (let i = -15; i <= 15; i++) {
@@ -169,6 +149,8 @@ export const getLatestMarketData = (): AnalysisPacket => {
 
   return {
     ticker: "SPX",
+    vix: 15.5 + (Math.random() - 0.5) * 1.2,
+    implied_move: 25 + (Math.random() * 15),
     timestamp: newPoint.time,
     current_price: parseFloat(newPoint.price.toFixed(2)),
     current_gex_vol: Math.round(newGexVol),

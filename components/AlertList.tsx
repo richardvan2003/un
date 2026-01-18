@@ -30,12 +30,11 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
     handleStopAudio();
     setPlayingId(alert.id);
 
-    // Extract sections for broadcasting
     const sections = alert.analysis.split(/(?=### \d\. )/);
     let broadcastText = "";
     sections.forEach(s => {
       if (s.includes("战术部署") || s.includes("结构诊断")) {
-        broadcastText += s.replace(/### \d\. /g, "").replace(/\n/g, " ").trim() + "。 ";
+        broadcastText += s.replace(/### \d\. /g, "").replace(/\n/g, " ").replace(/- /g, "").trim() + "。 ";
       }
     });
 
@@ -100,10 +99,22 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
           const trimmedLine = line.trim();
           if (!trimmedLine) return null;
 
-          const redundantPatterns = [/^信号[:：]/i, /^推荐[:：]/i, /^执行[:：]/i, /^模式[:：]/i, /^逻辑[:：]/i];
-          let displayLine = trimmedLine;
+          // Advanced cleaning for "精简" labels
+          const redundantPatterns = [
+            /^信号[:：]/i, /^推荐[:：]/i, /^执行[:：]/i, 
+            /^模式[:：]/i, /^逻辑[:：]/i, /^回顾[:：]/i,
+            /^入场[:：]/i, /^止损[:：]/i, /^止盈[:：]/i
+          ];
+          
+          let label = "";
+          let displayLine = trimmedLine.replace(/^- /g, '');
+          
           redundantPatterns.forEach(p => {
-            displayLine = displayLine.replace(p, '');
+            const match = displayLine.match(p);
+            if (match) {
+              label = match[0];
+              displayLine = displayLine.replace(p, '').trim();
+            }
           });
 
           const parts = displayLine.split(/(\*\*.*?\*\*)/);
@@ -117,7 +128,10 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
           if (trimmedLine.includes('🎯')) {
             const confidenceMatch = trimmedLine.match(/(\d+)%/);
             const confidence = confidenceMatch ? parseInt(confidenceMatch[1]) : 50;
-            const priceVal = trimmedLine.match(/评估[:：]\s*(\d+\.?\d*)/i)?.[1] || "---";
+            
+            // Refined robust regex to skip non-digits (like ** or :) and capture the number
+            const priceMatch = trimmedLine.match(/评估.*?[^0-9.]+(\d+\.?\d*)/i);
+            const priceVal = priceMatch ? priceMatch[1] : "---";
 
             return (
               <div key={lIdx} className="bg-zinc-900/40 p-3 rounded-lg border border-zinc-800 my-2 group transition-all hover:bg-zinc-900/60">
@@ -125,9 +139,9 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
                     <span className="text-[13px] font-black text-white">🎯 16:00 收盘预期: ${priceVal}</span>
                     <span className="text-[10px] font-black text-zinc-500 uppercase">置信度: {confidence}%</span>
                  </div>
-                 <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                 <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden border border-zinc-900">
                     <div 
-                      className={`h-full transition-all duration-1000 ${confidence > 75 ? 'bg-emerald-500' : confidence > 45 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                      className={`h-full transition-all duration-1000 ${confidence > 75 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' : confidence > 45 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]'}`}
                       style={{ width: `${confidence}%` }}
                     ></div>
                  </div>
@@ -136,9 +150,12 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
           }
 
           return (
-            <div key={lIdx} className="text-[13px] leading-tight text-zinc-400 py-1 flex items-start gap-2">
-              <span className="text-zinc-700 mt-1">•</span>
-              <span className="flex-1">{formattedLine}</span>
+            <div key={lIdx} className="text-[13px] leading-snug text-zinc-400 py-0.5 flex items-start gap-2">
+              <span className="text-zinc-700 mt-1.5 text-[8px]">•</span>
+              <span className="flex-1">
+                {label && <span className={`text-[11px] font-black uppercase mr-2 ${label.includes('回顾') ? 'text-indigo-400' : 'text-zinc-500'}`}>{label}</span>}
+                {formattedLine}
+              </span>
             </div>
           );
         });
@@ -146,11 +163,11 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
 
       return (
         <div key={idx} className="mb-6 last:mb-0">
-          <div className={`flex items-center gap-2 mb-2 ${colorClass} border-b border-zinc-900 pb-1`}>
-            <i className={`${icon} text-[11px]`}></i>
-            <h4 className="text-[11px] font-black uppercase tracking-[0.1em]">{title}</h4>
+          <div className={`flex items-center gap-2 mb-2 ${colorClass} border-b border-zinc-900/50 pb-1.5`}>
+            <i className={`${icon} text-[10px]`}></i>
+            <h4 className="text-[10px] font-black uppercase tracking-[0.2em]">{title}</h4>
           </div>
-          <div className="pl-2 space-y-0.5">
+          <div className="pl-1 space-y-0.5">
             {renderContent(content)}
           </div>
         </div>
@@ -168,40 +185,40 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
   }
 
   return (
-    <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar h-full font-mono">
+    <div className="space-y-6 overflow-y-auto pr-2 custom-scrollbar h-full font-sans">
       {alerts.map((alert) => (
         <div 
           key={alert.id} 
-          className={`relative bg-zinc-950 border rounded-xl p-4 shadow-xl transition-all hover:border-zinc-700 group overflow-hidden ${
+          className={`relative bg-zinc-950 border rounded-2xl p-5 shadow-2xl transition-all hover:border-zinc-700 group overflow-hidden ${
             alert.strategy === 'LONG' ? 'border-emerald-500/20' : 
             alert.strategy === 'SHORT' ? 'border-rose-500/20' : 'border-zinc-800'
           }`}
         >
-          <div className="flex justify-between items-start mb-4">
-             <div className="space-y-1">
+          <div className="flex justify-between items-start mb-5">
+             <div className="space-y-1.5">
                 <div className="flex items-center gap-2">
-                   <span className={`text-[11px] font-black px-2 py-0.5 rounded uppercase tracking-tighter ${
-                     alert.strategy === 'LONG' ? 'bg-emerald-500 text-black shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 
-                     alert.strategy === 'SHORT' ? 'bg-rose-500 text-black shadow-[0_0_10px_rgba(244,63,94,0.3)]' : 'bg-zinc-800 text-zinc-400'
+                   <span className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-widest shadow-lg ${
+                     alert.strategy === 'LONG' ? 'bg-emerald-500 text-black' : 
+                     alert.strategy === 'SHORT' ? 'bg-rose-500 text-black' : 'bg-zinc-800 text-zinc-400'
                    }`}>
-                     {alert.strategy}
+                     {alert.strategy === 'LONG' ? '做多' : alert.strategy === 'SHORT' ? '做空' : '观望'}
                    </span>
-                   <span className="text-[11px] font-black text-zinc-500 uppercase">
-                     ${alert.price.toFixed(0)}
+                   <span className="text-[12px] font-mono font-black text-zinc-400">
+                     ${alert.price.toFixed(1)}
                    </span>
                 </div>
-                <h3 className="text-[13px] font-black text-white uppercase tracking-tight group-hover:accent-text transition-colors">
-                  {alert.pattern || "探测中"}
+                <h3 className="text-[14px] font-black text-white uppercase tracking-tight group-hover:accent-text transition-colors">
+                  {alert.pattern || "信号探测"}
                 </h3>
              </div>
-             <div className="flex flex-col items-end gap-2">
-                <span className="text-[10px] font-bold text-zinc-600 uppercase">{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+             <div className="flex flex-col items-end gap-3">
+                <span className="text-[10px] font-bold text-zinc-600 uppercase tabular-nums">{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 <div className="flex items-center gap-2">
                   <button 
                     onClick={() => handleBroadcast(alert)}
-                    className={`text-[13px] p-1.5 rounded-md border transition-all ${
+                    className={`text-[13px] p-2 rounded-lg border transition-all ${
                       playingId === alert.id 
-                      ? 'text-emerald-400 border-emerald-400 bg-emerald-400/10 animate-pulse' 
+                      ? 'text-emerald-400 border-emerald-400 bg-emerald-400/10 shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-pulse' 
                       : 'text-zinc-600 border-zinc-800 hover:text-emerald-500 hover:border-emerald-500/40 hover:bg-emerald-500/5'
                     }`}
                     title="语音播报报告"
@@ -212,7 +229,7 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
                     <button 
                       onClick={() => onManualPush(alert)}
                       disabled={alert.pushedToDiscord || lastPushSuccess === alert.id}
-                      className={`text-[13px] transition-colors p-1.5 rounded-md border ${
+                      className={`text-[13px] transition-all p-2 rounded-lg border ${
                         alert.pushedToDiscord ? 'text-indigo-400 border-indigo-400/20 bg-indigo-400/5' : 
                         lastPushSuccess === alert.id ? 'text-emerald-400 border-emerald-400/20 bg-emerald-400/5' :
                         'text-zinc-600 border-zinc-800 hover:text-indigo-400 hover:border-indigo-400/40 hover:bg-indigo-400/5'
@@ -225,7 +242,7 @@ const AlertList: React.FC<AlertListProps> = ({ alerts, onManualPush, lastPushSuc
              </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-zinc-900/50">
+          <div className="mt-2 pt-4 border-t border-zinc-900/80">
             {formatAnalysis(alert.analysis)}
           </div>
         </div>

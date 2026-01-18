@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getLatestMarketData, getFullHistory } from './services/mockDataService';
 import { fetchUWMarketData, APIError } from './services/unusualWhalesService';
@@ -13,6 +14,8 @@ import CommandTerminal from './components/CommandTerminal';
 import SettingsPanel from './components/SettingsPanel';
 import ErrorBanner from './components/ErrorBanner';
 import StrategyLibrary from './components/StrategyLibrary';
+import StrategyStatistics from './components/StrategyStatistics';
+import DayRangePanel from './components/DayRangePanel';
 
 const checkMarketOpen = () => {
   const now = new Date();
@@ -299,15 +302,11 @@ const App: React.FC = () => {
                         </button>
                       </div>
                     ))}
-                    {[...Array(Math.max(0, 0))].map((_, i) => (
-                      <div key={i} className="aspect-video bg-zinc-900/10 border border-dashed border-zinc-800 rounded-xl flex items-center justify-center text-zinc-700 text-[10px] font-black uppercase">
-                        待分配链路
-                      </div>
-                    ))}
                   </div>
                 )}
 
                 <MarketStats data={marketData} />
+                <DayRangePanel data={marketData} />
                 <Panel>
                   <GexChart 
                     data={history.slice(-60)} 
@@ -332,6 +331,7 @@ const App: React.FC = () => {
           {activeTab === 'terminal' && <CommandTerminal onInject={(d) => setMarketData(d)} onAnalyze={performAnalysis} currentMarketData={marketData} config={externalConfig} onConfigUpdate={(k, v) => setExternalConfig(p => ({ ...p, [k]: v }))} />}
           {activeTab === 'strategy' && <StrategyLibrary />}
           {activeTab === 'settings' && <SettingsPanel theme={appTheme} fontSize={appFontSize} onThemeChange={setAppTheme} onFontSizeChange={setAppFontSize} />}
+          {activeTab === 'statistics' && <StrategyStatistics alerts={alerts} />}
         </div>
         <footer className="h-8 bg-zinc-950 border-t border-zinc-900 px-6 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">
            <div className="flex items-center gap-6">

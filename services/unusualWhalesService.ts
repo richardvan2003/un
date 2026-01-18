@@ -1,3 +1,4 @@
+
 import { AnalysisPacket, GexDataPoint, PriceLevelVolume, MarketTidePoint, TopStrike } from '../types';
 
 interface UWSpotExposureResponsePoint {
@@ -167,8 +168,16 @@ export const fetchUWMarketData = async (ticker: string, apiKey: string): Promise
     const sortedByOI = [...levels].sort((a, b) => (b.open_interest || 0) - (a.open_interest || 0));
     const sortedByDark = [...levels].sort((a, b) => (b.dark_pool_volume || 0) - (a.dark_pool_volume || 0));
 
+    // Fix: Ensure vix and implied_move are provided for AnalysisPacket type compatibility
+    const marketVix = parseSafeNumber(exposureJson.vix || tideJson.vix, 15.5);
+    const marketImpliedMove = parseSafeNumber(exposureJson.implied_move || tideJson.implied_move, 25.0);
+
     return {
       ticker: ticker.toUpperCase(),
+      // Fix: Added missing required 'vix' property
+      vix: marketVix,
+      // Optional implied_move for range calculations
+      implied_move: marketImpliedMove,
       timestamp: latest.time,
       current_price: Number(currentPrice.toFixed(2)),
       current_gex_vol: Math.round(currentGex),
